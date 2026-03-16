@@ -1,0 +1,79 @@
+use database learn;
+drop database learn;
+
+alter database learn read only = 1;
+
+create table employee(
+	eId int primary key,
+    firstName varchar(20),
+    lastName varchar(20),
+    pay decimal(5, 2),
+    hireDate date
+    );
+
+rename table workers to employee;
+drop table employee;
+
+alter table employee add phoneNumber varchar(10);
+alter table employee modify column phoneNumber varchar(12);
+alter table employee modify phoneNumber varchar(12) after lastName;
+alter table employee modify phoneNumber varchar(12) first;
+alter table add constraint unique(pId);
+alter table employee drop column phoneNumber;
+alter table product modify price decimal(5, 2) default 0.00; or alter table product alter price set default 0;
+
+insert into employee values(1, "Mark", "Jake", 50.00, "2005-05-04");
+insert into employee values
+	(2, "Clark", "Make", 50.00, "2005-05-04"),
+    	(3, "Zoe", "Salamanca", 230.50, "2003-07-09");
+
+select * from employee where eId != 1;
+
+update employee set hireDate = "2005-09-09" where eid = 5;
+update employee set hireDate = "2005-09-09"; (update ALL values)
+delete from employee where eid = 1;
+delete from employee; (delete ALL values)
+
+set autocommit = off;
+commit;
+rollback;
+
+insert into employee values(7, "Rocky", "Bhai", 500.25, CURRENT_DATE()); ( CURRENT_TIME())
+
+(UNIQUE allows NULL but PRIMARY KEY does not)
+
+select * from transaction inner join customer on transaction.cid = customer.cid;
+select max(amount) from transaction;
+select concat(firstName, " ", lastName) from employee;
+
+select * from employee where firstName like "c%";
+select * from employee where firstName like "c_";
+select * from employee order by eid desc;
+(ORDER BY can have multiple column names, if the value of first column is same then it goes to the next column to decide order)
+select * from employee order by firstName desc limit 3;
+select * from employee order by firstName desc limit 10, 3; (Offset by 10 and show 3 tuples)
+
+create view Name as select firstName, lastName from employee; (Views are virtual tables and automatically update based on the original table values
+
+select year(joinDate) from employee;
+select month(joinDate) from employee;
+select day(joinDate) from employee;
+select date(joinDate) from employee;
+select monthname(joinDate) from employee;
+select time(joinDate) from employee;
+
+SELECT drug, manufacturer, units_sold 
+FROM pharmacy_sales
+WHERE manufacturer IN ('Biogen', 'Bayer', 'Eli Lilly');
+
+(by default, ORDER BY is asc)
+(the aggregate functions are AVG, SUM, MIN, MAX, COUNT)
+(group by needs aggregate function in select)
+(WHERE on individual columns, while HAVING is for aggregated columns)
+
+CEIL rounds up
+FLOOR rounds down
+CAST converts operand to float. Syntax CAST(10 as DECIMAL)
+
+SELECT * FROM employees WHERE phone IS NULL; (is correct, not phone = NULL)
+SELECT IFNULL(bonus, 0) FROM employees;
