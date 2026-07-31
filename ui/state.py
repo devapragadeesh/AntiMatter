@@ -14,6 +14,13 @@ class AppState:
     input_path:    Optional[Path] = None
     output_dir:    Optional[Path] = None
 
+    # --- folder mode ---
+    is_folder:          bool = False
+    folder_file_count:  int  = 0
+    folder_dir_count:   int  = 0
+    folder_total_size_mb: float = 0.0
+    engine_breakdown:   dict = field(default_factory=dict)
+
     # --- profile (filled after drop) ---
     entropy:           float = 0.0
     repetitiveness:    float = 0.0
@@ -55,6 +62,11 @@ class AppState:
     def reset_file(self):
         """Clear file-specific state when a new file is dropped."""
         self.input_path             = None
+        self.is_folder               = False
+        self.folder_file_count       = 0
+        self.folder_dir_count        = 0
+        self.folder_total_size_mb    = 0.0
+        self.engine_breakdown        = {}
         self.entropy                = 0.0
         self.repetitiveness         = 0.0
         self.compression_hint       = 0.0

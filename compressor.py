@@ -577,6 +577,26 @@ def main():
         print(f"[ERROR] File not found: {path}")
         return
 
+    # --- folder archiving (.szip) ---
+    if path.is_dir():
+        if args.decompress:
+            print(f"[ERROR] --decompress on a directory doesn't make sense; "
+                  f"pass the .szip file instead.")
+            return
+        from archiver import compress_folder
+        constraints = list(zip(args.constraints, args.degrees or ["balanced"] * len(args.constraints)))
+        print(f"\nArchiving {path.name}...")
+        result = compress_folder(path, args.output, constraints, args.db)
+        print(result.summary())
+        return
+
+    if args.decompress and path.suffix.lower() == ".szip":
+        from archiver import decompress_folder
+        print(f"\nExtracting {path.name}...")
+        result = decompress_folder(path, args.output)
+        print(result.summary())
+        return
+
     # --- decompress ---
     if args.decompress:
         print(f"\nDecompressing {path.name}...")

@@ -121,8 +121,8 @@ class SettingsDialog(QDialog):
 
     def _make_divider(self) -> QFrame:
         div = QFrame()
-        div.setFrameShape(QFrame.HLine)
-        div.setStyleSheet("color: #2a2a2a;")
+        div.setObjectName("hr")
+        div.setFixedHeight(1)
         return div
 
     def _browse_output(self):

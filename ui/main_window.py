@@ -52,18 +52,14 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         header = QWidget()
         header.setFixedHeight(52)
-        header.setStyleSheet("background-color: #0d0d0d;")
 
         layout = QHBoxLayout(header)
         layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(12)
 
         # App name
         title = QLabel("ANTI MATTER")
         title.setObjectName("title_label")
-        title.setStyleSheet(
-            "font-size: 18px; font-weight: 800; "
-            "letter-spacing: 2px; color: #ffffff;"
-        )
 
         # right side — settings + version
         settings_btn = QPushButton("⚙")
@@ -72,8 +68,10 @@ class MainWindow(QMainWindow):
         settings_btn.setToolTip("Settings")
         settings_btn.clicked.connect(self._open_settings)
 
-        sep = QLabel("|")
-        sep.setStyleSheet("color: #333333; font-size: 16px;")
+        sep = QFrame()
+        sep.setObjectName("divider")
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFixedHeight(20)
 
         version = QLabel("v1.0")
         version.setObjectName("version_label")
@@ -88,8 +86,7 @@ class MainWindow(QMainWindow):
 
     def _build_divider(self) -> QFrame:
         div = QFrame()
-        div.setFrameShape(QFrame.HLine)
-        div.setStyleSheet("color: #1e1e1e; background-color: #1e1e1e;")
+        div.setObjectName("hr")
         div.setFixedHeight(1)
         return div
 

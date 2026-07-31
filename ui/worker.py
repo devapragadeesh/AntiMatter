@@ -2,10 +2,12 @@
 worker.py
 QThread workers — keeps UI responsive during heavy operations.
 
-Three workers:
-    ProfileWorker    — runs profiler + selector + predictor after file drop
-    CompressWorker   — runs actual compression, emits progress
-    DecompressWorker — runs decompression
+Workers:
+    ProfileWorker       — runs profiler + selector + predictor after file drop
+    CompressWorker      — runs actual compression, emits progress
+    DecompressWorker    — runs decompression
+    FolderProfileWorker — dry-run per-file profile/select/predict for a folder
+    FolderCompressWorker— runs archiver.compress_folder, emits real per-file progress
 """
 
 import sys
@@ -187,6 +189,121 @@ class CompressWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# Folder Profile Worker
+# Dry-run per-file profile/select/predict for a whole folder — runs when a
+# directory is dropped, mirrors ProfileWorker's role for single files.
+# ---------------------------------------------------------------------------
+
+class FolderProfileWorker(QThread):
+    """
+    Walks a folder and computes an aggregated preview (predicted ratio,
+    output size, confidence, per-engine breakdown) without compressing.
+    """
+    finished = Signal(dict)
+    error    = Signal(str)
+
+    def __init__(self, folder_path: Path, constraint: str, degree: str,
+                 db_path: Optional[Path] = None):
+        super().__init__()
+        self.folder_path = folder_path
+        self.constraint  = constraint
+        self.degree      = degree
+        self.db_path     = db_path
+
+    def run(self):
+        try:
+            import sys
+            from pathlib import Path
+            root = Path(__file__).parent.parent
+            if str(root) not in sys.path:
+                sys.path.insert(0, str(root))
+
+            from archiver import preview_folder
+
+            constraints = [(self.constraint, self.degree)]
+            kwargs = {}
+            if self.db_path:
+                kwargs["db_path"] = self.db_path
+
+            result = preview_folder(self.folder_path, constraints, **kwargs)
+            self.finished.emit(result)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ---------------------------------------------------------------------------
+# Folder Compress Worker
+# Runs archiver.compress_folder on a background thread, emitting real
+# per-file progress instead of the simulated time-based ticks single-file
+# compression uses.
+# ---------------------------------------------------------------------------
+
+class FolderCompressWorker(QThread):
+    progress = Signal(int)    # 0-100, driven by real per-file completions
+    finished = Signal(dict)
+    error    = Signal(str)
+
+    def __init__(
+        self,
+        folder_path: Path,
+        output_path: Optional[Path],
+        constraint:  str,
+        degree:      str,
+        db_path:     Optional[Path] = None,
+    ):
+        super().__init__()
+        self.folder_path = folder_path
+        self.output_path = output_path
+        self.constraint  = constraint
+        self.degree      = degree
+        self.db_path     = db_path
+
+    def run(self):
+        try:
+            import sys
+            from pathlib import Path
+            root = Path(__file__).parent.parent
+            if str(root) not in sys.path:
+                sys.path.insert(0, str(root))
+
+            from archiver import compress_folder
+
+            def on_progress(files_done, files_total, current_name):
+                pct = int(files_done / files_total * 100) if files_total else 100
+                self.progress.emit(pct)
+
+            constraints = [(self.constraint, self.degree)]
+            result = compress_folder(
+                self.folder_path,
+                self.output_path,
+                constraints,
+                self.db_path,
+                progress_cb=on_progress,
+            )
+
+            if not result.success:
+                self.error.emit(result.error or "Archive compression failed")
+                return
+
+            self.progress.emit(100)
+            self.finished.emit({
+                "file_count":       result.file_count,
+                "dir_count":        result.dir_count,
+                "skipped":          result.skipped,
+                "stored_count":     result.stored_count,
+                "ratio":            result.ratio,
+                "input_size_mb":    result.total_input_size  / 1024 / 1024,
+                "output_size_mb":   result.total_output_size / 1024 / 1024,
+                "compress_time":    result.elapsed,
+                "output_path":      str(result.output_path),
+            })
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ---------------------------------------------------------------------------
 # Progress Ticker — separate thread to animate progress bar
 # while CompressWorker runs on main thread
 # ---------------------------------------------------------------------------
@@ -246,6 +363,35 @@ class DecompressWorker(QThread):
             root = Path(__file__).parent.parent
             if str(root) not in sys.path:
                 sys.path.insert(0, str(root))
+
+            if self.file_path.suffix.lower() == ".szip":
+                from archiver import decompress_folder
+
+                def on_progress(files_done, files_total, current_name):
+                    pct = int(files_done / files_total * 100) if files_total else 100
+                    self.progress.emit(pct)
+
+                result = decompress_folder(
+                    self.file_path, self.output_path, progress_cb=on_progress
+                )
+
+                if not result.success:
+                    self.error.emit(result.error or "Archive extraction failed")
+                    return
+
+                self.progress.emit(100)
+                self.finished.emit({
+                    "is_folder":        True,
+                    "file_count":       result.file_count,
+                    "dir_count":        result.dir_count,
+                    "skipped":          result.skipped,
+                    "input_size_mb":    result.total_input_size  / 1024 / 1024,
+                    "output_size_mb":   result.total_output_size / 1024 / 1024,
+                    "decompress_time":  result.elapsed,
+                    "output_path":      str(result.output_path),
+                    "engine":           "szip (per-file)",
+                })
+                return
 
             from compressor import decompress
 

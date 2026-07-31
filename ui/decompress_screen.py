@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame,
     QPushButton, QComboBox, QFileDialog, QSizePolicy, QProgressBar,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
@@ -25,6 +26,10 @@ EXTENSION_ENGINE = {
     ".br":    "brotli",
 }
 
+ARCHIVE_EXTENSION = ".szip"
+
+NARROW_BREAKPOINT = 760
+
 
 # ---------------------------------------------------------------------------
 # Drop Zone (reused style, different label)
@@ -37,7 +42,7 @@ class DecompressDropZone(QFrame):
         super().__init__()
         self.setObjectName("drop_zone")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(180)
+        self.setMinimumHeight(160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._build()
 
@@ -46,13 +51,13 @@ class DecompressDropZone(QFrame):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(8)
 
-        icon = QLabel("📦")
+        icon = QLabel("\U0001F4E6")
+        icon.setObjectName("drop_icon")
         icon.setAlignment(Qt.AlignCenter)
-        icon.setStyleSheet("font-size: 32px;")
 
         title = QLabel("Drag & drop archive")
+        title.setObjectName("drop_title")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 500;")
 
         subtitle = QLabel("or click to browse local files")
         subtitle.setAlignment(Qt.AlignCenter)
@@ -65,7 +70,7 @@ class DecompressDropZone(QFrame):
     def mousePressEvent(self, event):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select compressed file",
-            filter="Compressed files (*.zst *.lz4 *.gz *.lzma *.br);;All files (*)"
+            filter="Compressed files (*.zst *.lz4 *.gz *.lzma *.br *.szip);;All files (*)"
         )
         if path:
             self.file_dropped.emit(Path(path))
@@ -96,7 +101,7 @@ class DecompressDropZone(QFrame):
 # ---------------------------------------------------------------------------
 
 class FileCard(QFrame):
-    def __init__(self, icon: str = "🗜"):
+    def __init__(self, icon: str = "\U0001F5DC"):
         super().__init__()
         self.setObjectName("file_card")
         self._icon_char = icon
@@ -108,7 +113,7 @@ class FileCard(QFrame):
         layout.setSpacing(12)
 
         self._icon = QLabel(self._icon_char)
-        self._icon.setStyleSheet("font-size: 22px;")
+        self._icon.setObjectName("icon_label")
         self._icon.setFixedWidth(30)
 
         info = QVBoxLayout()
@@ -130,6 +135,10 @@ class FileCard(QFrame):
         self._name.setText(path.name)
         self._meta.setText(f"{ext}  •  {size_mb:.2f} MB")
 
+    def clear(self):
+        self._name.setText("—")
+        self._meta.setText("—")
+
 
 # ---------------------------------------------------------------------------
 # Output Directory Row
@@ -149,8 +158,8 @@ class OutputDirRow(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(12)
 
-        icon = QLabel("📁")
-        icon.setStyleSheet("font-size: 22px;")
+        icon = QLabel("\U0001F4C1")
+        icon.setObjectName("icon_label")
         icon.setFixedWidth(30)
 
         info = QVBoxLayout()
@@ -163,9 +172,8 @@ class OutputDirRow(QFrame):
         info.addWidget(self._path_label)
         info.addWidget(self._free_label)
 
-        edit_btn = QPushButton("✏")
+        edit_btn = QPushButton("Change")
         edit_btn.setObjectName("browse_button")
-        edit_btn.setFixedWidth(28)
         edit_btn.clicked.connect(self._browse)
 
         layout.addWidget(icon)
@@ -217,7 +225,6 @@ class DecompressPredictionCard(QFrame):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(14)
 
-        # engine row
         engine_row = QHBoxLayout()
         engine_lbl = QLabel("Active Engine")
         engine_lbl.setObjectName("secondary_label")
@@ -229,10 +236,9 @@ class DecompressPredictionCard(QFrame):
         engine_row.addWidget(self._engine_val)
 
         div = QFrame()
-        div.setFrameShape(QFrame.HLine)
-        div.setStyleSheet("color: #2a2a2a;")
+        div.setObjectName("hr")
+        div.setFixedHeight(1)
 
-        # grid
         grid = QHBoxLayout()
         grid.setSpacing(16)
 
@@ -241,7 +247,7 @@ class DecompressPredictionCard(QFrame):
         size_lbl = QLabel("EST. RESTORED SIZE")
         size_lbl.setObjectName("section_label")
         self._size_val = QLabel("—")
-        self._size_val.setStyleSheet("font-size: 24px; font-weight: 700;")
+        self._size_val.setObjectName("value_large")
         self._size_sub = QLabel("")
         self._size_sub.setObjectName("value_accent")
         size_col.addWidget(size_lbl)
@@ -253,7 +259,7 @@ class DecompressPredictionCard(QFrame):
         dur_lbl = QLabel("EST. DURATION")
         dur_lbl.setObjectName("section_label")
         self._dur_val = QLabel("—")
-        self._dur_val.setStyleSheet("font-size: 24px; font-weight: 700;")
+        self._dur_val.setObjectName("value_large")
         self._dur_sub = QLabel("")
         self._dur_sub.setObjectName("secondary_label")
         dur_col.addWidget(dur_lbl)
@@ -274,12 +280,10 @@ class DecompressPredictionCard(QFrame):
         For decompression we don't have a predictor lookup,
         but we know the compressed size and can estimate from engine.
         """
-        self._engine_val.setText(f"🔵 {engine}")
+        self._engine_val.setText(engine)
 
         compressed_mb = path.stat().st_size / 1024 / 1024
 
-        # estimate restored size from compression_hint in filename or just show compressed
-        # for structured/repetitive files decompression is very fast
         decomp_speeds = {
             "zstd":   2500, "lz4": 3500,
             "gzip":   1500, "lzma": 400,
@@ -297,6 +301,16 @@ class DecompressPredictionCard(QFrame):
             self._dur_val.setText(f"~{est_time:.1f}s")
         self._dur_sub.setText(f"@ ~{speed} MB/s")
 
+    def update_archive(self, path: Path):
+        """Archive mode: per-entry engines vary, so we can't estimate a
+        single decompress speed — show archive size and a generic label."""
+        self._engine_val.setText("szip (per-file)")
+        compressed_mb = path.stat().st_size / 1024 / 1024
+        self._size_val.setText(f"~{compressed_mb:.1f} MB")
+        self._size_sub.setText("↑ expansion from archive")
+        self._dur_val.setText("—")
+        self._dur_sub.setText("varies per file")
+
     def show_result(self, result: dict):
         out_mb = result.get("output_size_mb", 0)
         t      = result.get("decompress_time", 0)
@@ -306,10 +320,15 @@ class DecompressPredictionCard(QFrame):
             self._size_val.setText(f"{out_mb/1024:.2f} GB")
         else:
             self._size_val.setText(f"{out_mb:.2f} MB")
-        self._size_sub.setText("✅ restored")
 
-        self._dur_val.setText(f"{t:.2f}s")
-        self._dur_sub.setText(f"@ {spd:.0f} MB/s actual")
+        if result.get("is_folder"):
+            self._size_sub.setText(f"Restored  •  {result.get('file_count', 0)} files")
+            self._dur_val.setText(f"{t:.2f}s")
+            self._dur_sub.setText("total, sequential")
+        else:
+            self._size_sub.setText("Restored")
+            self._dur_val.setText(f"{t:.2f}s")
+            self._dur_sub.setText(f"@ {spd:.0f} MB/s actual")
 
     def clear(self):
         self._engine_val.setText("—")
@@ -328,7 +347,7 @@ class ProgressStrip(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setFixedHeight(80)
+        self.setFixedHeight(76)
         self._build()
         self.hide()
 
@@ -338,12 +357,12 @@ class ProgressStrip(QWidget):
         layout.setSpacing(6)
 
         top = QHBoxLayout()
-        self._status   = QLabel("⟳ DECOMPRESSING")
+        self._status   = QLabel("DECOMPRESSING")
         self._status.setObjectName("section_label")
         self._filename = QLabel("")
         self._filename.setObjectName("secondary_label")
         self._pct      = QLabel("0%")
-        self._pct.setStyleSheet("font-size: 18px; font-weight: 700;")
+        self._pct.setObjectName("value_accent_blue")
         top.addWidget(self._status)
         top.addWidget(self._filename)
         top.addStretch()
@@ -356,7 +375,7 @@ class ProgressStrip(QWidget):
         self._bar.setFixedHeight(6)
 
         bot = QHBoxLayout()
-        cancel_btn = QPushButton("⊗ CANCEL")
+        cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancel_button")
         cancel_btn.clicked.connect(self.cancelled)
         bot.addStretch()
@@ -370,7 +389,7 @@ class ProgressStrip(QWidget):
         self._filename.setText(filename)
         self._bar.setValue(0)
         self._pct.setText("0%")
-        self._status.setText("⟳ DECOMPRESSING")
+        self._status.setText("DECOMPRESSING")
         self.show()
 
     def set_progress(self, pct: int):
@@ -380,7 +399,7 @@ class ProgressStrip(QWidget):
     def finish(self):
         self._bar.setValue(100)
         self._pct.setText("100%")
-        self._status.setText("✅ DONE")
+        self._status.setText("DONE")
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +413,8 @@ class DecompressScreen(QWidget):
         self._decompress_worker = None
         self._input_path        = None
         self._detected_engine   = None
+        self._open_btn          = None
+        self._narrow            = False
         self._build()
 
     def _build(self):
@@ -401,24 +422,51 @@ class DecompressScreen(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        panels = QHBoxLayout()
-        panels.setContentsMargins(24, 24, 24, 16)
-        panels.setSpacing(24)
+        self._panels_container = QWidget()
+        self._panels = QHBoxLayout(self._panels_container)
+        self._panels.setContentsMargins(24, 24, 24, 16)
+        self._panels.setSpacing(24)
 
-        panels.addLayout(self._build_left(), stretch=5)
+        self._left_layout  = self._build_left()
+        self._right_layout = self._build_right()
 
-        div = QFrame()
-        div.setObjectName("divider")
-        div.setFrameShape(QFrame.VLine)
-        panels.addWidget(div)
+        self._left_widget  = QWidget()
+        self._left_widget.setLayout(self._left_layout)
+        self._right_widget = QWidget()
+        self._right_widget.setLayout(self._right_layout)
 
-        panels.addLayout(self._build_right(), stretch=4)
+        self._divider = QFrame()
+        self._divider.setObjectName("divider")
+        self._divider.setFrameShape(QFrame.VLine)
 
-        root.addLayout(panels)
+        self._panels.addWidget(self._left_widget, stretch=5)
+        self._panels.addWidget(self._divider)
+        self._panels.addWidget(self._right_widget, stretch=4)
+
+        root.addWidget(self._panels_container, stretch=1)
 
         self._progress = ProgressStrip()
         self._progress.cancelled.connect(self._cancel)
         root.addWidget(self._progress)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        narrow = self.width() < NARROW_BREAKPOINT
+        if narrow != self._narrow:
+            self._narrow = narrow
+            self._apply_layout_mode(narrow)
+
+    def _apply_layout_mode(self, narrow: bool):
+        if narrow:
+            self._panels.setDirection(QVBoxLayout.TopToBottom)
+            self._divider.hide()
+            self._panels.setStretchFactor(self._left_widget, 0)
+            self._panels.setStretchFactor(self._right_widget, 0)
+        else:
+            self._panels.setDirection(QHBoxLayout.LeftToRight)
+            self._divider.show()
+            self._panels.setStretchFactor(self._left_widget, 5)
+            self._panels.setStretchFactor(self._right_widget, 4)
 
     def _build_left(self) -> QVBoxLayout:
         layout = QVBoxLayout()
@@ -433,7 +481,7 @@ class DecompressScreen(QWidget):
         staged_lbl = QLabel("STAGED ARCHIVE")
         staged_lbl.setObjectName("section_label")
 
-        self._file_card = FileCard("🗜")
+        self._file_card = FileCard("\U0001F5DC")
 
         dest_lbl = QLabel("OUTPUT DIRECTORY")
         dest_lbl.setObjectName("section_label")
@@ -443,12 +491,16 @@ class DecompressScreen(QWidget):
             self._output_row.set_path(self.state.output_dir)
         self._output_row.changed.connect(lambda p: setattr(self.state, "output_dir", p))
 
+        self._result_extras = QVBoxLayout()
+        self._result_extras.setSpacing(8)
+
         layout.addWidget(src_lbl)
         layout.addWidget(self._drop_zone)
         layout.addWidget(staged_lbl)
         layout.addWidget(self._file_card)
         layout.addWidget(dest_lbl)
         layout.addWidget(self._output_row)
+        layout.addLayout(self._result_extras)
         layout.addStretch()
 
         return layout
@@ -465,9 +517,9 @@ class DecompressScreen(QWidget):
 
         self._alloc_combo = QComboBox()
         self._alloc_combo.addItems([
-            "⚡  Max Speed",
-            "⚖  Balanced",
-            "💾  Memory Efficient",
+            "Max Speed",
+            "Balanced",
+            "Memory Efficient",
         ])
 
         params_frame = QFrame()
@@ -483,7 +535,7 @@ class DecompressScreen(QWidget):
 
         self._pred_card = DecompressPredictionCard()
 
-        self._cta = QPushButton("▶  EXTRACTION IN PROGRESS" if False else "▶  INITIALIZE ENGINE")
+        self._cta = QPushButton("INITIALIZE ENGINE")
         self._cta.setObjectName("cta_button")
         self._cta.setEnabled(False)
         self._cta.clicked.connect(self._start_decompression)
@@ -497,20 +549,32 @@ class DecompressScreen(QWidget):
         return layout
 
     def _on_file_dropped(self, path: Path):
-        self._input_path = path
         ext = path.suffix.lower()
-        self._detected_engine = EXTENSION_ENGINE.get(ext)
 
+        if path.is_dir() or (ext != ARCHIVE_EXTENSION and ext not in EXTENSION_ENGINE):
+            QMessageBox.warning(
+                self,
+                "Not a compressed file",
+                f"'{path.name}' isn't a compressed file this app recognizes "
+                f"and can't be selected for decompression.",
+            )
+            return
+
+        self._input_path = path
         self._file_card.set_file(path)
         self._pred_card.clear()
 
-        if self._detected_engine:
-            self._pred_card.update(path, self._detected_engine)
+        if ext == ARCHIVE_EXTENSION:
+            self._detected_engine = None
+            self._pred_card.update_archive(path)
             self._cta.setEnabled(True)
-            self._cta.setText("▶  INITIALIZE ENGINE")
-        else:
-            self._cta.setEnabled(False)
-            self._cta.setText("Unknown format")
+            self._cta.setText("INITIALIZE ENGINE")
+            return
+
+        self._detected_engine = EXTENSION_ENGINE.get(ext)
+        self._pred_card.update(path, self._detected_engine)
+        self._cta.setEnabled(True)
+        self._cta.setText("INITIALIZE ENGINE")
 
     def _start_decompression(self):
         if not self._input_path:
@@ -535,27 +599,40 @@ class DecompressScreen(QWidget):
     def _on_decompress_done(self, data: dict):
         self._progress.finish()
         self._pred_card.show_result(data)
-        self._cta.setText("✅  Decompress another file")
+        self._cta.setText("Decompress another file")
         self._cta.setEnabled(True)
         self._cta.clicked.disconnect()
         self._cta.clicked.connect(self._reset)
 
+        if self._open_btn is None:
+            self._open_btn = QPushButton("Open output folder")
+            self._open_btn.setObjectName("cancel_button")
+            self._open_btn.clicked.connect(self._open_output_folder)
+            self._result_extras.addWidget(self._open_btn)
+        self._open_btn.show()
+
+    def _open_output_folder(self):
+        if os.name == "nt":
+            import subprocess
+            subprocess.Popen(["explorer", str(self.state.output_dir)])
+
     def _on_decompress_error(self, msg: str):
         self._progress.hide()
         self._cta.setEnabled(True)
-        self._cta.setText("▶  INITIALIZE ENGINE")
+        self._cta.setText("INITIALIZE ENGINE")
 
     def _reset(self):
         self._input_path      = None
         self._detected_engine = None
         self._pred_card.clear()
-        self._file_card._name.setText("—")
-        self._file_card._meta.setText("—")
+        self._file_card.clear()
         self._progress.hide()
-        self._cta.setText("▶  INITIALIZE ENGINE")
+        self._cta.setText("INITIALIZE ENGINE")
         self._cta.setEnabled(False)
         self._cta.clicked.disconnect()
         self._cta.clicked.connect(self._start_decompression)
+        if self._open_btn:
+            self._open_btn.hide()
 
     def _cancel(self):
         if self._decompress_worker:
