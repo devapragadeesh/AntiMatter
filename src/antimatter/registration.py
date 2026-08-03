@@ -8,7 +8,7 @@ import sys
 import winreg
 from pathlib import Path
 
-from paths import get_app_root
+from .paths import get_app_root
 
 APP_NAME = "AntiMatter"
 DISPLAY_NAME = "Anti Matter"
@@ -27,8 +27,9 @@ def _command_string(flag: str) -> str:
     exe = _exe_path()
     if exe is not None:
         return f'"{exe}" {flag} "%1"'
-    main_py = get_app_root() / "main.py"
-    return f'"{sys.executable}" "{main_py}" {flag} "%1"'
+    # dev/unpackaged fallback: run via `python -m antimatter` with src/ on PYTHONPATH
+    src_dir = get_app_root().parent
+    return f'cmd /c "cd /d "{src_dir}" && "{sys.executable}" -m antimatter {flag} "%1""'
 
 
 def _write_flat_entries(hive_subkey: str, entries: list) -> None:

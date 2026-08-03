@@ -19,8 +19,8 @@ from .worker import (
     ProfileWorker, CompressWorker, ProgressTickerWorker,
     FolderProfileWorker, FolderCompressWorker, StandardCompressWorker,
 )
-from compressor import EXTENSION_ENGINE_MAP
-from archiver import PRECOMPRESSED_EXTENSIONS, ARCHIVE_EXTENSION
+from ..compressor import EXTENSION_ENGINE_MAP
+from ..archiver import PRECOMPRESSED_EXTENSIONS, ARCHIVE_EXTENSION
 
 # Width (px) below which the two-panel layout collapses to a single column.
 NARROW_BREAKPOINT = 760

@@ -38,10 +38,10 @@ import lz4.frame
 import zstandard as zstd
 import brotli
 
-from profiler import profile_file
-from selector import select, VALID_CONSTRAINTS, VALID_DEGREES, Recommendation
-from predictor import predict, compare as compare_prediction, Prediction
-from runner import ENGINE_LEVELS
+from .profiler import profile_file
+from .selector import select, VALID_CONSTRAINTS, VALID_DEGREES, Recommendation
+from .predictor import predict, compare as compare_prediction, Prediction
+from .runner import ENGINE_LEVELS
 
 # ---------------------------------------------------------------------------
 # Output file extensions per engine

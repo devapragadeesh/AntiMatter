@@ -3,17 +3,22 @@
 PyInstaller spec for Anti Matter — onedir build.
 Onedir (not onefile): a context-menu launch needs to feel instant, and
 onefile re-extracts the whole bundle to a temp dir on every single launch.
+
+Run from the repo root: pyinstaller packaging/AntiMatter.spec
 """
+import os
+
+REPO_ROOT = os.path.dirname(SPECPATH)  # packaging/ -> repo root
 
 block_cipher = None
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [os.path.join(REPO_ROOT, 'packaging', 'entrypoint.py')],
+    pathex=[os.path.join(REPO_ROOT, 'src')],
     binaries=[],
     datas=[
-        ('data/benchmark.db', 'data'),
-        ('assets/bg_loop.gif', 'assets'),
+        (os.path.join(REPO_ROOT, 'data', 'benchmark.db'), 'data'),
+        (os.path.join(REPO_ROOT, 'packaging', 'assets', 'bg_loop.gif'), 'assets'),
     ],
     hiddenimports=['zstandard', 'lz4.frame', 'brotli', 'rarfile'],
     hookspath=[],
@@ -42,7 +47,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/app_icon.ico',
+    icon=os.path.join(REPO_ROOT, 'packaging', 'assets', 'app_icon.ico'),
 )
 
 coll = COLLECT(

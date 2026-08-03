@@ -320,9 +320,7 @@ class DecompressPredictionCard(QFrame):
         self._engine_val.setText("szip (per-file)")
 
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-            from archiver import predict_archive_decompress
+            from ..archiver import predict_archive_decompress
 
             pred = predict_archive_decompress(path)
             output_mb = pred["predicted_output_size"] / 1024 / 1024
@@ -356,9 +354,7 @@ class DecompressPredictionCard(QFrame):
         exists for these codecs, so just list contents for a size/count
         preview rather than a speed/ratio prediction."""
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-            from standard_formats import list_archive_contents, _sniff_format
+            from ..standard_formats import list_archive_contents, _sniff_format
 
             fmt = _sniff_format(path)
             self._engine_val.setText(f"{fmt} (standard)")

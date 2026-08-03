@@ -41,10 +41,10 @@ from dataclasses import dataclass, field
 from typing import Optional, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
-from profiler import profile_file
-from selector import select, DB_PATH as SELECTOR_DB_PATH
-from predictor import predict
-from compressor import COMPRESS_FN, DECOMPRESS_FN
+from .profiler import profile_file
+from .selector import select, DB_PATH as SELECTOR_DB_PATH
+from .predictor import predict
+from .compressor import COMPRESS_FN, DECOMPRESS_FN
 
 # Thread pool size for parallel per-file profiling ahead of a folder
 # compress/preview run. Profiling is I/O-bound (reading file samples) plus

@@ -24,8 +24,8 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from paths import get_app_root
-from selector import get_db_rows, DB_PATH
+from .paths import get_app_root
+from .selector import get_db_rows, DB_PATH
 
 # Reference engine/level: fast, always present in benchmark.db, and already
 # the fixed default for tiny files (archiver.TINY_FILE_ENGINE/LEVEL) — a

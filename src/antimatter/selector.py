@@ -30,9 +30,9 @@ from typing import Optional
 
 import numpy as np
 
-from profiler import profile_file, FileProfile
-from runner import ENGINE_LEVELS
-from paths import DEFAULT_DB_PATH
+from .profiler import profile_file, FileProfile
+from .runner import ENGINE_LEVELS
+from .paths import DEFAULT_DB_PATH
 
 # ---------------------------------------------------------------------------
 # Config

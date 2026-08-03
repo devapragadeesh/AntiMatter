@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QResizeEvent, QMovie
 
-from paths import ASSETS_DIR
+from ..paths import ASSETS_DIR
 from .state import AppState
 from .compress_screen import CompressScreen
 from .decompress_screen import DecompressScreen
@@ -30,9 +30,7 @@ class MainWindow(QMainWindow):
         from threading import Thread
         def _warm_cache():
             try:
-                from paths import ensure_on_path
-                ensure_on_path()
-                from selector import get_db_rows
+                from ..selector import get_db_rows
                 get_db_rows()
             except Exception:
                 pass
@@ -46,9 +44,7 @@ class MainWindow(QMainWindow):
         # get_speed_factor() reading the cache.
         def _calibrate():
             try:
-                from paths import ensure_on_path
-                ensure_on_path()
-                from calibration import run_calibration, CACHE_PATH
+                from ..calibration import run_calibration, CACHE_PATH
                 if not CACHE_PATH.exists():
                     run_calibration()
             except Exception:

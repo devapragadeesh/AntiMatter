@@ -1,4 +1,4 @@
-; installer/AntiMatter.iss
+; packaging/installer/AntiMatter.iss
 ; Inno Setup script for Anti Matter — bundles the PyInstaller onedir build
 ; and registers/unregisters Explorer context-menu entries via the packaged
 ; exe's own --register/--unregister mode (see registration.py). No-admin
@@ -12,7 +12,7 @@ AppPublisher=Anti Matter
 DefaultDirName={localappdata}\Programs\Anti Matter
 DefaultGroupName=Anti Matter
 PrivilegesRequired=lowest
-OutputDir=..\dist_installer
+OutputDir=..\..\dist_installer
 OutputBaseFilename=AntiMatterSetup
 Compression=lzma2
 SolidCompression=yes
@@ -20,7 +20,7 @@ SetupIconFile=..\assets\app_icon.ico
 UninstallDisplayIcon={app}\AntiMatter.exe
 
 [Files]
-Source: "..\dist\AntiMatter\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+Source: "..\..\dist\AntiMatter\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Anti Matter"; Filename: "{app}\AntiMatter.exe"

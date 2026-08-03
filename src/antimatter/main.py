@@ -3,26 +3,22 @@ main.py
 Entry point for ANTI MATTER.
 
 Run from the project root:
-    python main.py
-    python main.py --context-compress "C:\\path\\to\\file_or_folder"
-    python main.py --context-extract "C:\\path\\to\\archive.szip"
-    python main.py --register      (writes HKCU context-menu registry keys)
-    python main.py --unregister    (removes them)
+    python -m antimatter --context-compress "C:\\path\\to\\file_or_folder"
+    python -m antimatter --context-extract "C:\\path\\to\\archive.szip"
+    python -m antimatter --register      (writes HKCU context-menu registry keys)
+    python -m antimatter --unregister    (removes them)
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-from paths import ensure_on_path
-ensure_on_path()
-
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
-from ui.main_window import MainWindow
-from ui.styles import DARK_THEME
+from .ui.main_window import MainWindow
+from .ui.styles import DARK_THEME
 
 
 def parse_args(argv):
@@ -54,7 +50,7 @@ def main():
     args = parse_args(sys.argv[1:])
 
     if args.register or args.unregister:
-        from registration import register, unregister
+        from .registration import register, unregister
         ok = register() if args.register else unregister()
         sys.exit(0 if ok else 1)
 

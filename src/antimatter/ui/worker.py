@@ -41,12 +41,9 @@ class ProfileWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
-            from profiler import profile_file
-            from selector import select
-            from predictor import predict
+            from ..profiler import profile_file
+            from ..selector import select
+            from ..predictor import predict
 
             # profile
             profile = profile_file(self.file_path)
@@ -139,10 +136,7 @@ class CompressWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
-            from compressor import compress
+            from ..compressor import compress
 
             # emit fake progress based on predicted time
             # real compression runs in the same thread —
@@ -206,10 +200,7 @@ class FolderProfileWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
-            from archiver import preview_folder
+            from ..archiver import preview_folder
 
             def on_progress(files_done, files_total, current_name):
                 pct = int(files_done / files_total * 100) if files_total else 100
@@ -257,10 +248,7 @@ class FolderCompressWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
-            from archiver import compress_folder
+            from ..archiver import compress_folder
 
             def on_progress(files_done, files_total, current_name):
                 pct = int(files_done / files_total * 100) if files_total else 100
@@ -320,10 +308,7 @@ class StandardCompressWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
-            from standard_formats import compress_to_zip, compress_to_tar
+            from ..standard_formats import compress_to_zip, compress_to_tar
 
             def on_progress(files_done, files_total, current_name):
                 pct = int(files_done / files_total * 100) if files_total else 100
@@ -413,11 +398,8 @@ class DecompressWorker(QThread):
 
     def run(self):
         try:
-            from paths import ensure_on_path
-            ensure_on_path()
-
             if self.file_path.suffix.lower() == ".szip":
-                from archiver import decompress_folder
+                from ..archiver import decompress_folder
 
                 def on_progress(files_done, files_total, current_name):
                     pct = int(files_done / files_total * 100) if files_total else 100
@@ -445,7 +427,7 @@ class DecompressWorker(QThread):
                 })
                 return
 
-            from standard_formats import _sniff_format, UnsupportedFormatError
+            from ..standard_formats import _sniff_format, UnsupportedFormatError
 
             try:
                 archive_format = _sniff_format(self.file_path)
@@ -453,7 +435,7 @@ class DecompressWorker(QThread):
                 archive_format = None
 
             if archive_format in ("zip", "tar", "rar"):
-                from standard_formats import extract_archive
+                from ..standard_formats import extract_archive
 
                 def on_progress(files_done, files_total, current_name):
                     pct = int(files_done / files_total * 100) if files_total else 100
@@ -481,7 +463,7 @@ class DecompressWorker(QThread):
                 })
                 return
 
-            from compressor import decompress
+            from ..compressor import decompress
 
             self.progress.emit(50)
             result = decompress(self.file_path, self.output_path, self.engine)

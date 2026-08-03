@@ -28,10 +28,10 @@ from typing import Optional
 
 import numpy as np
 
-from profiler import profile_file, FileProfile
-from selector import get_db_rows, FEATURE_COLS, FEATURE_WEIGHTS, _get_feature_matrix, _vectorized_distances
-from runner import ENGINE_LEVELS
-from calibration import get_speed_factor
+from .profiler import profile_file, FileProfile
+from .selector import get_db_rows, FEATURE_COLS, FEATURE_WEIGHTS, _get_feature_matrix, _vectorized_distances
+from .runner import ENGINE_LEVELS
+from .calibration import get_speed_factor
 
 
 # ---------------------------------------------------------------------------

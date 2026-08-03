@@ -7,7 +7,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
-from paths import DEFAULT_DB_PATH
+from ..paths import DEFAULT_DB_PATH
 
 
 @dataclass

@@ -25,7 +25,7 @@ import argparse
 from pathlib import Path
 from typing import Optional, Callable
 
-from archiver import ArchiveResult, iter_folder_entries
+from .archiver import ArchiveResult, iter_folder_entries
 
 try:
     import rarfile
