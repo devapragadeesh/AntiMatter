@@ -295,7 +295,7 @@ def predict(
         profile = profile_file(file_path)
 
     # --- load DB ---
-    from selector import get_db_rows, DB_PATH
+    from .selector import get_db_rows, DB_PATH
     actual_db_path = db_path or DB_PATH
     db_rows = get_db_rows(actual_db_path)
 
@@ -467,7 +467,7 @@ def main():
     print(f"\nFile : {path.name}  ({size_mb:.2f} MB)")
     print(f"Profiling...")
 
-    from profiler import profile_file
+    from .profiler import profile_file
     profile = profile_file(path)
     print(
         f"  entropy={profile.entropy:.3f}  "

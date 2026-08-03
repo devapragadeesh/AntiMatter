@@ -83,7 +83,7 @@ def run_calibration(db_path: Optional[Path] = None) -> float:
     # would be circular. run_calibration() itself is only ever called
     # standalone (CLI) or from the app-startup background thread, never
     # from inside predict(), so the lazy import costs nothing on the hot path.
-    from compressor import COMPRESS_FN
+    from .compressor import COMPRESS_FN
 
     data = _make_calibration_buffer()
     fn = COMPRESS_FN[REFERENCE_ENGINE]

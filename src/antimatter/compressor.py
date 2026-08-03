@@ -591,7 +591,7 @@ def main():
         path.suffix.lower() in STANDARD_ARCHIVE_SUFFIXES
         or path.name.lower().endswith((".tar.gz", ".tar.bz2", ".tar.xz"))
     ):
-        from standard_formats import extract_archive
+        from .standard_formats import extract_archive
         print(f"\nExtracting {path.name}...")
         result = extract_archive(path, args.output)
         print(result.summary())
@@ -599,7 +599,7 @@ def main():
 
     # --- create: standard formats (zip/tar) ---
     if not args.decompress and args.format != "szip":
-        from standard_formats import compress_to_zip, compress_to_tar
+        from .standard_formats import compress_to_zip, compress_to_tar
         print(f"\nCompressing {path.name} as {args.format}...")
         if args.format == "zip":
             result = compress_to_zip(path, args.output)
@@ -614,7 +614,7 @@ def main():
             print(f"[ERROR] --decompress on a directory doesn't make sense; "
                   f"pass the archive file instead.")
             return
-        from archiver import compress_folder
+        from .archiver import compress_folder
         constraints = list(zip(args.constraints, args.degrees or ["balanced"] * len(args.constraints)))
         print(f"\nArchiving {path.name}...")
         result = compress_folder(path, args.output, constraints, args.db)
@@ -622,7 +622,7 @@ def main():
         return
 
     if args.decompress and path.suffix.lower() == ".szip":
-        from archiver import decompress_folder
+        from .archiver import decompress_folder
         print(f"\nExtracting {path.name}...")
         result = decompress_folder(path, args.output)
         print(result.summary())

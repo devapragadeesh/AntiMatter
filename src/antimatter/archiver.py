@@ -436,8 +436,8 @@ def predict_archive_decompress(path: Path, db_path: Optional[Path] = None) -> di
     (averaged from benchmark.db, then scaled by the local hardware
     calibration factor, same as single-file predictions).
     """
-    from selector import get_db_rows, DB_PATH as SELECTOR_DEFAULT_DB
-    from calibration import get_speed_factor
+    from .selector import get_db_rows, DB_PATH as SELECTOR_DEFAULT_DB
+    from .calibration import get_speed_factor
 
     manifest = read_manifest(path)
     entries = [e for e in manifest.get("entries", []) if e.get("type") == "file"]
