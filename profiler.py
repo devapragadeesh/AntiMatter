@@ -24,7 +24,7 @@ import zlib
 import struct
 import argparse
 from pathlib import Path
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, asdict
 
 
@@ -119,25 +119,56 @@ def compute_repetitiveness(data: bytes) -> float:
     in the preceding 32KB window — a rough LZ77 match ratio proxy.
 
     Returns 0.0 (no repetition) to 1.0 (fully repetitive).
+
+    Implemented as a rolling hash-set of the needles inside the trailing
+    window (a deque of needles in window order + a count-map for O(1)
+    membership) instead of re-slicing and substring-searching the whole
+    32KB window on every probe — same semantics, O(1) work per probe
+    instead of O(window_size).
     """
     if len(data) < 16:
         return 0.0
 
     step        = 8       # stride between probes (faster than every byte)
     window_size = 32768   # 32KB lookback window
+    window_probes = window_size // step   # probes worth of needles held in the window
     matches     = 0
     probes      = 0
 
+    seen_counts = {}
+    window_queue = deque()
+
     i = window_size
     while i < len(data) - 8:
-        needle  = data[i: i + 8]
-        window  = data[max(0, i - window_size): i]
-        if needle in window:
+        needle = data[i: i + 8]
+
+        if needle in seen_counts:
             matches += 1
-        probes  += 1
-        i       += step
+
+        window_queue.append(needle)
+        seen_counts[needle] = seen_counts.get(needle, 0) + 1
+
+        if len(window_queue) > window_probes:
+            oldest = window_queue.popleft()
+            count = seen_counts[oldest] - 1
+            if count <= 0:
+                del seen_counts[oldest]
+            else:
+                seen_counts[oldest] = count
+
+        probes += 1
+        i      += step
 
     return matches / probes if probes > 0 else 0.0
+
+
+_NUMERIC_BYTES_TABLE = bytes(
+    1 if i in set(b"0123456789.,-+eE") else 0 for i in range(256)
+)
+_ASCII_PRINTABLE_TABLE = bytes(
+    1 if i in (set(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}) else 0
+    for i in range(256)
+)
 
 
 def compute_numeric_density(data: bytes) -> float:
@@ -146,9 +177,10 @@ def compute_numeric_density(data: bytes) -> float:
     plus common numeric punctuation (., -, +, e, E).
     Higher values suggest CSV/SQL/structured numeric content.
     """
-    numeric_bytes = set(b"0123456789.,-+eE")
-    count = sum(1 for b in data if b in numeric_bytes)
-    return count / len(data) if data else 0.0
+    if not data:
+        return 0.0
+    count = data.translate(_NUMERIC_BYTES_TABLE).count(1)
+    return count / len(data)
 
 
 def compute_ascii_ratio(data: bytes) -> float:
@@ -158,9 +190,10 @@ def compute_ascii_ratio(data: bytes) -> float:
     High ratio → text-like content (XML, SQL, HTML, logs).
     Low ratio  → binary content.
     """
-    printable = set(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
-    count = sum(1 for b in data if b in printable)
-    return count / len(data) if data else 0.0
+    if not data:
+        return 0.0
+    count = data.translate(_ASCII_PRINTABLE_TABLE).count(1)
+    return count / len(data)
 
 
 def compute_compression_hint(data: bytes) -> float:

@@ -39,11 +39,18 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 from profiler import profile_file
 from selector import select, DB_PATH as SELECTOR_DB_PATH
 from predictor import predict
 from compressor import COMPRESS_FN, DECOMPRESS_FN
+
+# Thread pool size for parallel per-file profiling ahead of a folder
+# compress/preview run. Profiling is I/O-bound (reading file samples) plus
+# zlib/hashing C calls that release the GIL, so a pool larger than cpu_count
+# is fine and gives a real wall-clock speedup over one-file-at-a-time.
+PROFILE_WORKERS = min(32, (os.cpu_count() or 4) * 4)
 
 MAGIC = b"SZIP"
 FORMAT_VERSION = 1
@@ -172,13 +179,16 @@ def _is_precompressed(abs_path: Path) -> bool:
     return abs_path.suffix.lower() in PRECOMPRESSED_EXTENSIONS
 
 
-def _select_for_entry(abs_path: Path, size: int, constraints: list, db_path) -> tuple:
+def _select_for_entry(abs_path: Path, size: int, constraints: list, db_path, profile=None) -> tuple:
     """
     Returns (engine, level) for one file.
     Known-precompressed formats (by extension) and tiny files skip full k-NN
     selection — precompressed content won't shrink further (re-running the
     codec just burns CPU), and tiny files' fixed k-NN cost dominates runtime
     at that size — everything else goes through the normal selector.
+
+    profile, if given, is a pre-computed FileProfile — avoids re-reading and
+    re-profiling the file from disk when the caller already has one.
     """
     if _is_precompressed(abs_path):
         return STORE_ENGINE, None
@@ -189,8 +199,36 @@ def _select_for_entry(abs_path: Path, size: int, constraints: list, db_path) -> 
     kwargs = {}
     if db_path:
         kwargs["db_path"] = db_path
-    rec = select(abs_path, constraints, **kwargs)
+    rec = select(abs_path, constraints, profile=profile, **kwargs)
     return rec.engine, rec.level
+
+
+def _profile_entries_parallel(entries: list) -> dict:
+    """
+    Profile a batch of (abs_path, size) entries concurrently and return
+    {abs_path: FileProfile}. Entries that don't need profiling (precompressed
+    extensions, tiny files) should already be filtered out by the caller —
+    this only ever does the expensive profile_file() work.
+
+    profile_file() is I/O-bound (reads a sample from disk) plus zlib/hash
+    calls that release the GIL, so a thread pool gives a real wall-clock
+    speedup over profiling one file at a time, which is what made folder
+    previews slow for larger file counts.
+    """
+    if not entries:
+        return {}
+
+    profiles = {}
+    with ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
+        future_to_path = {
+            pool.submit(profile_file, abs_path): abs_path
+            for abs_path, _size in entries
+        }
+        for future in future_to_path:
+            abs_path = future_to_path[future]
+            profiles[abs_path] = future.result()
+
+    return profiles
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +279,19 @@ def compress_folder(
     dir_entries = [e for e in work_entries if e[2]]
     total_files = len(file_entries)
 
+    # Profile every file that will need k-NN selection up front, in parallel —
+    # this is the expensive part (profiler.py feature extraction), and doing
+    # it in a thread pool ahead of the sequential write loop below is what
+    # makes folder compression fast for many-file folders.
+    sizes = {abs_path: abs_path.stat().st_size for abs_path, _, _ in file_entries
+              if abs_path.exists()}
+    to_profile = [
+        (abs_path, sizes[abs_path]) for abs_path, _, _ in file_entries
+        if abs_path in sizes and not _is_precompressed(abs_path)
+        and sizes[abs_path] >= TINY_FILE_THRESHOLD
+    ]
+    profiles = _profile_entries_parallel(to_profile)
+
     manifest_entries = []
     total_input_size = 0
     total_output_size = 0
@@ -266,7 +317,8 @@ def compress_folder(
                     continue
 
                 sha256_hex = hashlib.sha256(data).hexdigest()
-                engine, level = _select_for_entry(abs_path, size, constraints, db_path)
+                profile = profiles.get(abs_path)
+                engine, level = _select_for_entry(abs_path, size, constraints, db_path, profile=profile)
 
                 if engine == STORE_ENGINE:
                     compressed = data
@@ -356,6 +408,83 @@ def _read_manifest(fh) -> dict:
     fh.seek(manifest_offset)
     manifest_bytes = fh.read(manifest_length)
     return json.loads(manifest_bytes.decode("utf-8"))
+
+
+def read_manifest(path: Path) -> dict:
+    """
+    Read-only peek at a .szip archive's manifest — validates magic/version
+    and returns the parsed manifest dict, without extracting anything.
+    Public counterpart to _read_manifest(fh), for callers (like decompress
+    prediction) that only need entry metadata, not a full extraction.
+    """
+    with open(path, "rb") as fh:
+        magic = fh.read(4)
+        if magic != MAGIC:
+            raise ValueError("Not a valid .szip file (bad magic bytes)")
+        (version,) = struct.unpack("<H", fh.read(2))
+        if version != FORMAT_VERSION:
+            raise ValueError(f"Unsupported .szip format version: {version}")
+        return _read_manifest(fh)
+
+
+def predict_archive_decompress(path: Path, db_path: Optional[Path] = None) -> dict:
+    """
+    Estimate total decompress time/size for a .szip archive from its
+    manifest, without decompressing anything. Each entry already records
+    the exact engine/level/compressed_size/original_size used, so sizes are
+    exact sums — only per-engine decompress throughput is a prediction
+    (averaged from benchmark.db, then scaled by the local hardware
+    calibration factor, same as single-file predictions).
+    """
+    from selector import get_db_rows, DB_PATH as SELECTOR_DEFAULT_DB
+    from calibration import get_speed_factor
+
+    manifest = read_manifest(path)
+    entries = [e for e in manifest.get("entries", []) if e.get("type") == "file"]
+
+    rows = get_db_rows(db_path or SELECTOR_DEFAULT_DB)
+    speed_cache = {}
+
+    def decompress_speed_for(engine: str, level) -> float:
+        key = (engine, level)
+        if key in speed_cache:
+            return speed_cache[key]
+        speeds = [
+            r["decompress_speed"] for r in rows
+            if r.get("engine") == engine and r.get("level") == level
+            and r.get("decompress_speed", 0) > 0
+        ]
+        speed = (sum(speeds) / len(speeds)) if speeds else 0.0
+        speed_cache[key] = speed
+        return speed
+
+    speed_factor = get_speed_factor()
+    total_output_size = 0
+    total_time = 0.0
+    engine_breakdown = {}
+
+    for entry in entries:
+        engine = entry.get("engine", STORE_ENGINE)
+        level = entry.get("level")
+        original_size = entry.get("original_size", 0)
+        compressed_size = entry.get("compressed_size", 0)
+
+        total_output_size += original_size
+        engine_breakdown[engine] = engine_breakdown.get(engine, 0) + 1
+
+        if engine == STORE_ENGINE:
+            continue  # raw bytes, effectively memcpy — negligible time
+
+        speed = decompress_speed_for(engine, level) * speed_factor
+        if speed > 0:
+            total_time += (compressed_size / 1024 / 1024) / speed
+
+    return {
+        "predicted_decompress_time": total_time,
+        "predicted_output_size": total_output_size,
+        "file_count": len(entries),
+        "engine_breakdown": engine_breakdown,
+    }
 
 
 def decompress_folder(
@@ -499,10 +628,14 @@ def preview_folder(
     input_path:  Path,
     constraints: list = None,          # type: ignore
     db_path:     Optional[Path] = None,
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> dict:
     """
     Walk + profile + select + predict per file WITHOUT compressing.
     Returns an aggregated dict for UI display before the user commits.
+
+    progress_cb, if given, is called as progress_cb(files_done, files_total,
+    current_rel_path) as each file's profiling/selection/prediction finishes.
     """
     if constraints is None:
         constraints = []
@@ -523,6 +656,10 @@ def preview_folder(
     CONF_SCORE = {"high": 2, "medium": 1, "low": 0}
     CONF_LABEL = {2: "high", 1: "medium", 0: "low"}
 
+    # First pass: stat every file, and work out up front which ones will
+    # need full k-NN profiling (skip symlinks/dirs and the same fast-path
+    # skips _select_for_entry applies for precompressed/tiny files).
+    file_infos = []  # (abs_path, rel, size)
     for abs_path, rel, is_dir, is_symlink in entries:
         if is_symlink:
             skipped.append((rel, "symlink (not followed)"))
@@ -537,13 +674,31 @@ def preview_folder(
             skipped.append((rel, f"stat error: {e}"))
             continue
 
-        file_count += 1
+        file_infos.append((abs_path, rel, size))
+
+    file_count = len(file_infos)
+    total_files = file_count
+
+    to_profile = [
+        (abs_path, size) for abs_path, rel, size in file_infos
+        if not _is_precompressed(abs_path) and size >= TINY_FILE_THRESHOLD
+    ]
+    # Profile once (if this file will actually go through k-NN selection) and
+    # reuse the same FileProfile for both select() and predict() — each would
+    # otherwise independently re-read and re-profile the file from disk. This
+    # is the expensive step, done in parallel across files rather than one at
+    # a time — the fix for folder previews being slow for many files.
+    profiles = _profile_entries_parallel(to_profile)
+
+    for i, (abs_path, rel, size) in enumerate(file_infos):
         total_input_size += size
 
-        engine, level = _select_for_entry(abs_path, size, constraints, db_path)
+        profile = profiles.get(abs_path)
+
+        engine, level = _select_for_entry(abs_path, size, constraints, db_path, profile=profile)
         engine_breakdown[engine] = engine_breakdown.get(engine, 0) + 1
 
-        pred = predict(abs_path, engine, level, db_path) if engine != STORE_ENGINE else None
+        pred = predict(abs_path, engine, level, db_path, profile=profile) if engine != STORE_ENGINE else None
         if pred:
             predicted_output = size / pred.predicted_ratio if pred.predicted_ratio > 0 else size
             total_predicted_output += predicted_output
@@ -555,6 +710,9 @@ def preview_folder(
 
         confidence_scores.append(score)
         confidence_weights.append(size)
+
+        if progress_cb:
+            progress_cb(i + 1, total_files, rel)
 
     if confidence_weights and sum(confidence_weights) > 0:
         weighted_score = sum(s * w for s, w in zip(confidence_scores, confidence_weights)) / sum(confidence_weights)

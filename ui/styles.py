@@ -40,11 +40,15 @@ DARK_THEME = f"""
 }}
 
 QWidget {{
-    background-color: {COLOR_BG};
+    background-color: transparent;
     font-size: 13px;
 }}
 
-QMainWindow, QDialog {{
+QMainWindow {{
+    background-color: transparent;
+}}
+
+QDialog {{
     background-color: {COLOR_BG};
 }}
 
@@ -154,30 +158,30 @@ QLabel#folder_link:hover {{
 
 /* ── Panels ──────────────────────────────────────────── */
 QFrame#panel {{
-    background-color: {COLOR_BG_PANEL};
+    background-color: rgba(28, 28, 38, 210);
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS_MD}px;
 }}
 
 QFrame#drop_zone {{
-    background-color: {COLOR_BG_PANEL};
+    background-color: rgba(28, 28, 38, 210);
     border: 2px dashed {COLOR_BORDER};
     border-radius: {RADIUS_MD}px;
 }}
 
 QFrame#drop_zone:hover {{
     border-color: {COLOR_ACCENT};
-    background-color: #1a2438;
+    background-color: rgba(26, 36, 56, 220);
 }}
 
 QFrame#drop_zone_active {{
-    background-color: #1a2438;
+    background-color: rgba(26, 36, 56, 220);
     border: 2px dashed {COLOR_ACCENT};
     border-radius: {RADIUS_MD}px;
 }}
 
 QFrame#file_card {{
-    background-color: {COLOR_BG_RAISED};
+    background-color: rgba(38, 38, 47, 210);
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS_MD}px;
 }}
@@ -218,16 +222,16 @@ QTabBar::tab:hover:!selected {{
 
 QTabWidget::pane {{
     border: none;
-    background-color: {COLOR_BG};
+    background-color: transparent;
 }}
 
 QTabWidget {{
-    background-color: {COLOR_BG};
+    background-color: transparent;
 }}
 
 /* ── Dropdowns ───────────────────────────────────────── */
 QComboBox {{
-    background-color: {COLOR_BG_RAISED};
+    background-color: rgba(38, 38, 47, 210);
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS_SM}px;
     padding: 8px 12px;
@@ -270,7 +274,7 @@ QComboBox:disabled::down-arrow {{
 }}
 
 QComboBox QAbstractItemView {{
-    background-color: {COLOR_BG_RAISED};
+    background-color: rgba(38, 38, 47, 235);
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS_SM}px;
     selection-background-color: {COLOR_ACCENT};
@@ -349,7 +353,7 @@ QPushButton#browse_button:hover {{
 
 /* ── Progress Bar ────────────────────────────────────── */
 QProgressBar {{
-    background-color: {COLOR_BG_RAISED};
+    background-color: rgba(38, 38, 47, 210);
     border: none;
     border-radius: 3px;
     height: 6px;
@@ -403,7 +407,7 @@ QDialog#settings_dialog {{
 }}
 
 QLineEdit {{
-    background-color: {COLOR_BG_RAISED};
+    background-color: rgba(38, 38, 47, 210);
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS_SM}px;
     padding: 8px 12px;

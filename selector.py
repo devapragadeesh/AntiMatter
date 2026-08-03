@@ -28,14 +28,17 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
+
 from profiler import profile_file, FileProfile
 from runner import ENGINE_LEVELS
+from paths import DEFAULT_DB_PATH
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-DB_PATH = Path("data/benchmark.db")
+DB_PATH = DEFAULT_DB_PATH
 
 # How many nearest neighbors to use for interpolation
 K_NEIGHBORS = 20
@@ -70,7 +73,7 @@ FEATURE_WEIGHTS = {
 CONSTRAINT_WEIGHTS = {
     #                     ratio  cmp_spd  dcmp_spd  memory
     "max_compression":  [0.90,   0.05,    0.03,    0.02],  # unchanged — already optimal
-    "balanced":         [0.50,   0.20,    0.20,    0.10],  # ratio weight up from 0.40
+    "balanced":         [0.30,   0.40,    0.20,    0.10],  # ratio weight down from 0.50 — was still ~2x cmp-speed weight even after log-scale speed normalization, causing balanced to collapse onto max_compression's pick
     "fast_compression": [0.10,   0.80,    0.05,    0.05],  # unchanged — already optimal
     "fast_decompress":  [0.10,   0.05,    0.80,    0.05],  # unchanged — already optimal
     "low_cpu":          [0.15,   0.65,    0.15,    0.05],  # unchanged — already optimal
@@ -204,6 +207,43 @@ def get_db_rows(db_path: Path = DB_PATH) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Vectorized feature matrix — built once per db_rows identity, reused across
+# every file in a batch (folder preview/compress) instead of re-scanning the
+# ~12k-row list in a pure-Python loop per file. Keyed by id(db_rows) since
+# get_db_rows() already caches the list itself per process.
+# ---------------------------------------------------------------------------
+_FEATURE_WEIGHTS_ARR = np.array([FEATURE_WEIGHTS[c] for c in FEATURE_COLS])
+
+_FEATURE_MATRIX_CACHE: dict = {}   # id(db_rows) -> (raw_matrix, engine_arr, level_arr)
+
+def _get_feature_matrix(db_rows: list):
+    key = id(db_rows)
+    cached = _FEATURE_MATRIX_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    raw = np.array([[row[c] for c in FEATURE_COLS] for row in db_rows], dtype=np.float64)
+    engine_arr = np.array([row["engine"] for row in db_rows])
+    level_arr = np.array([row["level"] for row in db_rows])
+
+    result = (raw, engine_arr, level_arr)
+    _FEATURE_MATRIX_CACHE.clear()   # only ever one db_rows identity per process in practice
+    _FEATURE_MATRIX_CACHE[key] = result
+    return result
+
+
+def _vectorized_distances(profile: FileProfile, raw_matrix: np.ndarray) -> np.ndarray:
+    """
+    Weighted euclidean distance from profile to every row in raw_matrix,
+    computed as a single vectorized pass instead of a per-row Python loop.
+    Matches _euclidean_distance()'s formula exactly: sum(w * (p-r)^2) per row.
+    """
+    profile_vec = np.array([getattr(profile, c) for c in FEATURE_COLS])
+    diff = profile_vec - raw_matrix
+    return np.sqrt(np.sum(_FEATURE_WEIGHTS_ARR * diff * diff, axis=1))
+
+
+# ---------------------------------------------------------------------------
 # k-NN + interpolation
 # ---------------------------------------------------------------------------
 
@@ -274,13 +314,14 @@ def find_neighbors(profile: FileProfile, db_rows: list, k: int = K_NEIGHBORS * 5
     We use a larger pool here so each engine/level has enough candidates.
     Returns list of (distance, row) sorted by distance ascending.
     """
-    distances = []
-    for row in db_rows:
-        dist = _euclidean_distance(profile, row)
-        distances.append((dist, row))
+    raw_matrix, _, _ = _get_feature_matrix(db_rows)
+    distances = _vectorized_distances(profile, raw_matrix)
 
-    distances.sort(key=lambda x: x[0])
-    return distances[:k]
+    k = min(k, len(db_rows))
+    nearest_idx = np.argpartition(distances, k - 1)[:k]
+    nearest_idx = nearest_idx[np.argsort(distances[nearest_idx])]
+
+    return [(float(distances[i]), db_rows[i]) for i in nearest_idx]
 
 
 # ---------------------------------------------------------------------------
@@ -342,13 +383,27 @@ def _normalize_scores(candidates: list) -> list:
             return 0.5
         return (val - lo) / (hi - lo)
 
+    def norm_log(val, lo, hi):
+        """
+        Log-scale min-max. compress/decompress speed across engines spans
+        multiple orders of magnitude (e.g. ~1.6 MB/s brotli11 to ~1500 MB/s
+        lz4-1) — plain linear norm() crushes everything except the single
+        fastest candidate down to ~0, making the speed term in
+        score_candidates() unable to distinguish the rest of the field.
+        Log-scaling first spreads that range out evenly before min-maxing.
+        """
+        if hi <= 0 or lo <= 0 or hi == lo:
+            return 0.5
+        val = max(val, 1e-9)
+        return (math.log(val) - math.log(lo)) / (math.log(hi) - math.log(lo))
+
     normalized = []
     for c in candidates:
         normalized.append({
             "candidate":   c,
             "norm_ratio":  norm(c.predicted_ratio,            min(ratios),  max(ratios)),
-            "norm_cmp":    norm(c.predicted_compress_speed,   min(cmps),    max(cmps)),
-            "norm_dcmp":   norm(c.predicted_decompress_speed, min(dcmps),   max(dcmps)),
+            "norm_cmp":    norm_log(c.predicted_compress_speed,   min(cmps),  max(cmps)),
+            "norm_dcmp":   norm_log(c.predicted_decompress_speed, min(dcmps), max(dcmps)),
             "norm_mem":    norm(c.predicted_memory_mb,        min(mems),    max(mems)),
         })
 
@@ -418,6 +473,7 @@ def select(
     constraints: list = None, # type: ignore
     db_path: Path = DB_PATH,
     n_alternatives: int = 3,
+    profile: Optional[FileProfile] = None,
 ) -> Recommendation:
     """
     Main entry point. Called by compressor.py and the UI.
@@ -429,6 +485,9 @@ def select(
                         defaults to [("balanced", "balanced")] if empty
         db_path:        path to benchmark.db
         n_alternatives: how many alternatives to include
+        profile:        pre-computed FileProfile, if the caller already has
+                        one (e.g. batch folder previews) — avoids re-reading
+                        and re-profiling the file from disk
 
     Returns:
         Recommendation with best engine/level + alternatives
@@ -436,8 +495,9 @@ def select(
     if constraints is None:
         constraints = []
 
-    # --- step 1: profile the file ---
-    profile = profile_file(file_path)
+    # --- step 1: profile the file (skip if caller already has one) ---
+    if profile is None:
+        profile = profile_file(file_path)
 
     # --- step 2: load DB + find neighbors ---
     db_rows   = get_db_rows(db_path)

@@ -4,15 +4,18 @@ Entry point for ANTI MATTER.
 
 Run from the project root:
     python main.py
+    python main.py --context-compress "C:\\path\\to\\file_or_folder"
+    python main.py --context-extract "C:\\path\\to\\archive.szip"
+    python main.py --register      (writes HKCU context-menu registry keys)
+    python main.py --unregister    (removes them)
 """
 
 import sys
+import argparse
 from pathlib import Path
 
-# ensure project root is on path so ui/ can import compressor, selector etc
-root = Path(__file__).parent
-if str(root) not in sys.path:
-    sys.path.insert(0, str(root))
+from paths import ensure_on_path
+ensure_on_path()
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
@@ -22,7 +25,39 @@ from ui.main_window import MainWindow
 from ui.styles import DARK_THEME
 
 
+def parse_args(argv):
+    parser = argparse.ArgumentParser(add_help=True)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--context-compress", type=Path, default=None, metavar="PATH",
+        help="Launch GUI with PATH pre-staged on the Compress tab "
+             "(used by the Explorer 'Compress with Anti Matter' entry)"
+    )
+    group.add_argument(
+        "--context-extract", type=Path, default=None, metavar="PATH",
+        help="Launch GUI with PATH pre-staged on the Decompress tab "
+             "(used by the Explorer 'Extract with Anti Matter' entry)"
+    )
+    group.add_argument(
+        "--register", action="store_true",
+        help="Write Explorer context-menu registry entries (HKCU) and exit"
+    )
+    group.add_argument(
+        "--unregister", action="store_true",
+        help="Remove Explorer context-menu registry entries and exit"
+    )
+    # parse_known_args (not parse_args): don't fight Qt's own recognized flags
+    return parser.parse_known_args(argv)[0]
+
+
 def main():
+    args = parse_args(sys.argv[1:])
+
+    if args.register or args.unregister:
+        from registration import register, unregister
+        ok = register() if args.register else unregister()
+        sys.exit(0 if ok else 1)
+
     # enable high DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -41,7 +76,10 @@ def main():
     font.setPointSize(10)
     app.setFont(font)
 
-    window = MainWindow()
+    initial_path = args.context_compress or args.context_extract
+    initial_mode = "extract" if args.context_extract else ("compress" if args.context_compress else None)
+
+    window = MainWindow(initial_path=initial_path, initial_mode=initial_mode)
     window.show()
 
     sys.exit(app.exec())

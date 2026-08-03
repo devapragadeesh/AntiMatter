@@ -7,6 +7,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
+from paths import DEFAULT_DB_PATH
+
 
 @dataclass
 class AppState:
@@ -57,7 +59,7 @@ class AppState:
     output_path:          Optional[Path] = None
 
     # --- settings ---
-    db_path: Optional[Path] = Path("data/benchmark.db")
+    db_path: Optional[Path] = DEFAULT_DB_PATH
 
     def reset_file(self):
         """Clear file-specific state when a new file is dropped."""

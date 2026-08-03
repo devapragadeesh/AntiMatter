@@ -569,6 +569,13 @@ def main():
         "--db", type=Path, default=None,
         help="Path to benchmark.db"
     )
+    parser.add_argument(
+        "--format", type=str, default="szip",
+        choices=["szip", "zip", "tar.gz", "tar.bz2", "tar.xz"],
+        help="Archive format to create for a folder/file (default: szip, "
+             "Anti Matter's smart per-file format). Standard formats bypass "
+             "profiling/selection and use their own conventional codec."
+    )
 
     args = parser.parse_args()
     path = args.path.resolve()
@@ -577,11 +584,35 @@ def main():
         print(f"[ERROR] File not found: {path}")
         return
 
+    STANDARD_ARCHIVE_SUFFIXES = (".zip", ".rar", ".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz")
+
+    # --- decompress: standard formats (zip/tar/rar) ---
+    if args.decompress and (
+        path.suffix.lower() in STANDARD_ARCHIVE_SUFFIXES
+        or path.name.lower().endswith((".tar.gz", ".tar.bz2", ".tar.xz"))
+    ):
+        from standard_formats import extract_archive
+        print(f"\nExtracting {path.name}...")
+        result = extract_archive(path, args.output)
+        print(result.summary())
+        return
+
+    # --- create: standard formats (zip/tar) ---
+    if not args.decompress and args.format != "szip":
+        from standard_formats import compress_to_zip, compress_to_tar
+        print(f"\nCompressing {path.name} as {args.format}...")
+        if args.format == "zip":
+            result = compress_to_zip(path, args.output)
+        else:
+            result = compress_to_tar(path, args.output, compression=args.format.split(".", 1)[1])
+        print(result.summary())
+        return
+
     # --- folder archiving (.szip) ---
     if path.is_dir():
         if args.decompress:
             print(f"[ERROR] --decompress on a directory doesn't make sense; "
-                  f"pass the .szip file instead.")
+                  f"pass the archive file instead.")
             return
         from archiver import compress_folder
         constraints = list(zip(args.constraints, args.degrees or ["balanced"] * len(args.constraints)))

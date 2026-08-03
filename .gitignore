@@ -1,3 +1,8 @@
 data/
 Tools/raw/
 Tools/chunks/
+__pycache__/
+*.pyc
+dist/
+build/
+calibration_cache.json

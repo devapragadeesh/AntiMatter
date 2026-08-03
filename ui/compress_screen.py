@@ -17,7 +17,7 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from .state import AppState
 from .worker import (
     ProfileWorker, CompressWorker, ProgressTickerWorker,
-    FolderProfileWorker, FolderCompressWorker,
+    FolderProfileWorker, FolderCompressWorker, StandardCompressWorker,
 )
 from compressor import EXTENSION_ENGINE_MAP
 from archiver import PRECOMPRESSED_EXTENSIONS, ARCHIVE_EXTENSION
@@ -580,6 +580,17 @@ class CompressScreen(QWidget):
         params_lbl = QLabel("PARAMETERS")
         params_lbl.setObjectName("section_label")
 
+        format_lbl = QLabel("OUTPUT FORMAT")
+        format_lbl.setObjectName("secondary_label")
+
+        self._format_combo = QComboBox()
+        self._format_combo.addItems([
+            "Anti Matter (.szip smart)",
+            "Zip",
+            "Tar.gz",
+        ])
+        self._format_combo.currentIndexChanged.connect(self._on_format_changed)
+
         constraint_lbl = QLabel("CONSTRAINT")
         constraint_lbl.setObjectName("secondary_label")
 
@@ -602,12 +613,15 @@ class CompressScreen(QWidget):
         self._degree_combo.setCurrentIndex(1)
         self._degree_combo.setEnabled(False)  # constraint defaults to "Balanced" (index 0)
         self._degree_combo.currentIndexChanged.connect(self._on_constraint_changed)
+        self._prev_constraint_index = 0
 
         params_frame = QFrame()
         params_frame.setObjectName("panel")
         params_layout = QVBoxLayout(params_frame)
         params_layout.setContentsMargins(16, 16, 16, 16)
         params_layout.setSpacing(10)
+        params_layout.addWidget(format_lbl)
+        params_layout.addWidget(self._format_combo)
         params_layout.addWidget(constraint_lbl)
         params_layout.addWidget(self._constraint_combo)
         params_layout.addWidget(degree_lbl)
@@ -632,6 +646,57 @@ class CompressScreen(QWidget):
         return layout
 
     # ── Slots ────────────────────────────────────────────
+
+    def _get_output_format(self) -> Optional[str]:
+        """Returns None for the smart .szip/engine path, else 'zip'/'tar.gz'."""
+        format_map = {0: None, 1: "zip", 2: "tar.gz"}
+        return format_map.get(self._format_combo.currentIndex())
+
+    def _on_format_changed(self):
+        is_standard = self._get_output_format() is not None
+        self._constraint_combo.setEnabled(not is_standard)
+        self._degree_combo.setEnabled(not is_standard and self._constraint_combo.currentIndex() != 0)
+
+        if self.state.input_path:
+            if is_standard:
+                self._show_standard_format_preview()
+                self._cta.setText("INITIALIZE ENGINE")
+                self._cta.setEnabled(True)
+            elif self.state.is_folder:
+                self._run_folder_profile()
+            else:
+                self._run_profile()
+
+    def _show_standard_format_preview(self):
+        """
+        Zip/tar have no benchmark.db coverage, so there's no predicted
+        ratio/speed to show — populate the card with what we actually know
+        (format, input size, file count) instead of leaving it all dashes.
+        """
+        fmt_names = {"zip": "zip (deflate)", "tar.gz": "tar.gz (gzip)"}
+        fmt = self._get_output_format()
+
+        self._pred_card.clear()
+        self._pred_card._engine_val.setText(fmt_names.get(fmt, fmt or "—"))
+
+        if self.state.is_folder:
+            size_mb = self.state.folder_total_size_mb
+            count_note = f"{self.state.folder_file_count} files"
+        else:
+            size_mb = self.state.input_path.stat().st_size / 1024 / 1024
+            count_note = "1 file"
+
+        if size_mb >= 1024:
+            self._pred_card._size_val.setText(f"{size_mb/1024:.2f} GB")
+        else:
+            self._pred_card._size_val.setText(f"{size_mb:.2f} MB")
+        self._pred_card._size_sub.setText(f"input size  •  {count_note}")
+        self._pred_card._dur_val.setText("—")
+        self._pred_card._dur_sub.setText("no estimate for standard formats")
+        self._pred_card._range_val.setText("—")
+        self._pred_card._mem_val.setText("—")
+        self._pred_card._conf_val.setText("N/A (standard format)")
+        self._pred_card._conf_val.setStyleSheet("")
 
     def _get_constraint_degree(self):
         constraint_map = {
@@ -681,14 +746,40 @@ class CompressScreen(QWidget):
             self.state.folder_file_count = file_count
             self.state.folder_total_size_mb = total_size / 1024 / 1024
             self._file_card.set_folder(path, file_count, total_size)
-            self._run_folder_profile()
+            if self._get_output_format() is not None:
+                self._show_standard_format_preview()
+                self._cta.setEnabled(True)
+            else:
+                self._run_folder_profile()
         else:
             self.state.is_folder = False
             self._file_card.set_file(path)
-            self._run_profile()
+            if self._get_output_format() is not None:
+                self._show_standard_format_preview()
+                self._cta.setEnabled(True)
+            else:
+                self._run_profile()
 
     def _on_constraint_changed(self):
-        self._degree_combo.setEnabled(self._constraint_combo.currentIndex() != 0)
+        constraint_index = self._constraint_combo.currentIndex()
+        self._degree_combo.setEnabled(constraint_index != 0)
+
+        # Moving away from "Balanced" into any other constraint (Max
+        # Compression, Fast Compression, etc.) should start from a clear,
+        # non-stale strength rather than silently keeping whatever degree
+        # was last selected (previously defaulted to "Balanced", making
+        # e.g. "Max Compression" behave like a much weaker constraint than
+        # its name implies until the user manually touched "Degree").
+        # Only fires on the transition, so a degree choice the user makes
+        # afterward for this constraint isn't overwritten. prev_constraint_index
+        # is updated BEFORE setCurrentIndex below, since that call re-enters
+        # this same handler (both combos share it) and must see the
+        # transition as already-consumed to avoid re-triggering itself.
+        was_balanced = self._prev_constraint_index == 0
+        self._prev_constraint_index = constraint_index
+        if constraint_index != 0 and was_balanced:
+            self._degree_combo.setCurrentIndex(2)  # "High"
+
         if self.state.input_path:
             if self.state.is_folder:
                 self._run_folder_profile()
@@ -759,7 +850,10 @@ class CompressScreen(QWidget):
         pred_display = dict(data)
         pred_display["engine"] = breakdown_str or "—"
         pred_display["level"] = ""
-        pred_display["predicted_compress_speed"] = 0
+        _pred_time = data.get("predicted_compress_time", 0)
+        pred_display["predicted_compress_speed"] = (
+            self.state.folder_total_size_mb / _pred_time if _pred_time > 0 else 0
+        )
         pred_display["predicted_memory_mb"] = 0
         pred_display["ratio_low"] = data["predicted_ratio"]
         pred_display["ratio_high"] = data["predicted_ratio"]
@@ -797,6 +891,23 @@ class CompressScreen(QWidget):
         self.state.output_dir = output_dir
 
         self._cta.setEnabled(False)
+
+        output_format = self._get_output_format()
+        if output_format is not None:
+            self._progress.start(self.state.input_path.name, 1.0)
+            self._compress_worker = StandardCompressWorker(
+                self.state.input_path,
+                output_dir,
+                output_format,
+            )
+            self._compress_worker.progress.connect(
+                lambda pct: self._progress.set_progress(pct)
+            )
+            self._compress_worker.finished.connect(self._on_folder_compress_done)
+            self._compress_worker.error.connect(self._on_compress_error)
+            self._compress_worker.start()
+            return
+
         self._progress.start(
             self.state.input_path.name,
             self.state.predicted_compress_time,
@@ -882,7 +993,25 @@ class CompressScreen(QWidget):
         ratio  = d.get("ratio", 0)
         err = abs(pred_ratio - ratio) / pred_ratio * 100 if pred_ratio > 0 else 0
 
-        if self.state.is_folder:
+        is_standard = str(d.get("engine", "")).endswith("(standard)")
+
+        if is_standard:
+            self._pred_card._engine_val.setText(d.get("engine", "—"))
+            if out_mb >= 1024:
+                self._pred_card._size_val.setText(f"~{out_mb/1024:.2f} GB")
+            else:
+                self._pred_card._size_val.setText(f"~{out_mb:.2f} MB")
+            reduction = (1 - 1/ratio) * 100 if ratio > 1 else 0
+            self._pred_card._size_sub.setText(
+                f"↓ {reduction:.0f}% reduction  •  {ratio:.2f}x actual  •  {d.get('file_count', 0)} files"
+            )
+            self._pred_card._dur_val.setText(f"{d['compress_time']:.1f}s")
+            self._pred_card._dur_sub.setText("total")
+            self._pred_card._range_val.setText("—")
+            self._pred_card._mem_val.setText("—")
+            self._pred_card._conf_val.setText("N/A (standard format)")
+            self._pred_card._conf_val.setStyleSheet("")
+        elif self.state.is_folder:
             breakdown_str = ", ".join(
                 f"{eng}({n})" for eng, n in sorted(self.state.engine_breakdown.items())
             )

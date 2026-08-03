@@ -28,6 +28,14 @@ EXTENSION_ENGINE = {
 
 ARCHIVE_EXTENSION = ".szip"
 
+# Extensions for the standard-format interop path (extraction only for .rar).
+STANDARD_ARCHIVE_EXTENSIONS = (".zip", ".rar", ".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz")
+
+
+def _has_standard_archive_extension(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(STANDARD_ARCHIVE_EXTENSIONS)
+
 NARROW_BREAKPOINT = 760
 
 
@@ -70,7 +78,11 @@ class DecompressDropZone(QFrame):
     def mousePressEvent(self, event):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select compressed file",
-            filter="Compressed files (*.zst *.lz4 *.gz *.lzma *.br *.szip);;All files (*)"
+            filter=(
+                "Compressed files (*.zst *.lz4 *.gz *.lzma *.br *.szip "
+                "*.zip *.rar *.tar *.tar.gz *.tar.bz2 *.tar.xz *.tgz);;"
+                "All files (*)"
+            )
         )
         if path:
             self.file_dropped.emit(Path(path))
@@ -302,14 +314,71 @@ class DecompressPredictionCard(QFrame):
         self._dur_sub.setText(f"@ ~{speed} MB/s")
 
     def update_archive(self, path: Path):
-        """Archive mode: per-entry engines vary, so we can't estimate a
-        single decompress speed — show archive size and a generic label."""
+        """Archive mode: read the .szip manifest (engine/level/size per
+        entry are already recorded there) and compute a real weighted
+        decompress-time estimate instead of a flat placeholder."""
         self._engine_val.setText("szip (per-file)")
-        compressed_mb = path.stat().st_size / 1024 / 1024
-        self._size_val.setText(f"~{compressed_mb:.1f} MB")
-        self._size_sub.setText("↑ expansion from archive")
-        self._dur_val.setText("—")
-        self._dur_sub.setText("varies per file")
+
+        try:
+            from paths import ensure_on_path
+            ensure_on_path()
+            from archiver import predict_archive_decompress
+
+            pred = predict_archive_decompress(path)
+            output_mb = pred["predicted_output_size"] / 1024 / 1024
+            est_time = pred["predicted_decompress_time"]
+
+            breakdown_str = ", ".join(
+                f"{eng}({n})" for eng, n in sorted(pred["engine_breakdown"].items())
+            )
+            self._engine_val.setText(breakdown_str or "szip (per-file)")
+
+            self._size_val.setText(f"~{output_mb:.1f} MB")
+            self._size_sub.setText("↑ expansion from archive")
+
+            if est_time < 1:
+                self._dur_val.setText("<1s")
+            else:
+                self._dur_val.setText(f"~{est_time:.1f}s")
+            self._dur_sub.setText(f"{pred['file_count']} files, estimated")
+
+        except Exception:
+            # Corrupt/foreign file, or manifest failed to parse — fall back
+            # to the old generic display rather than crashing the UI.
+            compressed_mb = path.stat().st_size / 1024 / 1024
+            self._size_val.setText(f"~{compressed_mb:.1f} MB")
+            self._size_sub.setText("↑ expansion from archive")
+            self._dur_val.setText("—")
+            self._dur_sub.setText("varies per file")
+
+    def update_standard_archive(self, path: Path):
+        """Standard-format (zip/tar/rar) mode: no per-file benchmark data
+        exists for these codecs, so just list contents for a size/count
+        preview rather than a speed/ratio prediction."""
+        try:
+            from paths import ensure_on_path
+            ensure_on_path()
+            from standard_formats import list_archive_contents, _sniff_format
+
+            fmt = _sniff_format(path)
+            self._engine_val.setText(f"{fmt} (standard)")
+
+            entries = list_archive_contents(path)
+            file_entries = [e for e in entries if not e["is_dir"]]
+            total_size_mb = sum(e["size"] for e in file_entries) / 1024 / 1024
+
+            self._size_val.setText(f"~{total_size_mb:.1f} MB")
+            self._size_sub.setText("↑ expansion from archive")
+            self._dur_val.setText("—")
+            self._dur_sub.setText(f"{len(file_entries)} files")
+
+        except Exception:
+            compressed_mb = path.stat().st_size / 1024 / 1024
+            self._engine_val.setText("standard archive")
+            self._size_val.setText(f"~{compressed_mb:.1f} MB")
+            self._size_sub.setText("↑ expansion from archive")
+            self._dur_val.setText("—")
+            self._dur_sub.setText("preview unavailable")
 
     def show_result(self, result: dict):
         out_mb = result.get("output_size_mb", 0)
@@ -509,27 +578,6 @@ class DecompressScreen(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(16)
 
-        params_lbl = QLabel("PARAMETERS")
-        params_lbl.setObjectName("section_label")
-
-        alloc_lbl = QLabel("ALLOCATION PROFILE")
-        alloc_lbl.setObjectName("secondary_label")
-
-        self._alloc_combo = QComboBox()
-        self._alloc_combo.addItems([
-            "Max Speed",
-            "Balanced",
-            "Memory Efficient",
-        ])
-
-        params_frame = QFrame()
-        params_frame.setObjectName("panel")
-        params_layout = QVBoxLayout(params_frame)
-        params_layout.setContentsMargins(16, 16, 16, 16)
-        params_layout.setSpacing(10)
-        params_layout.addWidget(alloc_lbl)
-        params_layout.addWidget(self._alloc_combo)
-
         telem_lbl = QLabel("TELEMETRY & PREDICTION")
         telem_lbl.setObjectName("section_label")
 
@@ -540,8 +588,6 @@ class DecompressScreen(QWidget):
         self._cta.setEnabled(False)
         self._cta.clicked.connect(self._start_decompression)
 
-        layout.addWidget(params_lbl)
-        layout.addWidget(params_frame)
         layout.addWidget(telem_lbl)
         layout.addWidget(self._pred_card, stretch=1)
         layout.addWidget(self._cta)
@@ -550,8 +596,9 @@ class DecompressScreen(QWidget):
 
     def _on_file_dropped(self, path: Path):
         ext = path.suffix.lower()
+        is_standard = _has_standard_archive_extension(path)
 
-        if path.is_dir() or (ext != ARCHIVE_EXTENSION and ext not in EXTENSION_ENGINE):
+        if path.is_dir() or (ext != ARCHIVE_EXTENSION and ext not in EXTENSION_ENGINE and not is_standard):
             QMessageBox.warning(
                 self,
                 "Not a compressed file",
@@ -567,6 +614,13 @@ class DecompressScreen(QWidget):
         if ext == ARCHIVE_EXTENSION:
             self._detected_engine = None
             self._pred_card.update_archive(path)
+            self._cta.setEnabled(True)
+            self._cta.setText("INITIALIZE ENGINE")
+            return
+
+        if is_standard:
+            self._detected_engine = None
+            self._pred_card.update_standard_archive(path)
             self._cta.setEnabled(True)
             self._cta.setText("INITIALIZE ENGINE")
             return

@@ -26,9 +26,12 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
+
 from profiler import profile_file, FileProfile
-from selector import get_db_rows, FEATURE_COLS, FEATURE_WEIGHTS
+from selector import get_db_rows, FEATURE_COLS, FEATURE_WEIGHTS, _get_feature_matrix, _vectorized_distances
 from runner import ENGINE_LEVELS
+from calibration import get_speed_factor
 
 
 # ---------------------------------------------------------------------------
@@ -172,24 +175,22 @@ def _find_neighbors_for_engine(
     """
     Find k nearest neighbors in db_rows that match engine+level.
     Returns list of (distance, row) sorted by distance ascending.
+    Uses the same cached numpy feature matrix as selector.find_neighbors()
+    (built once per db_rows identity) so a per-file call here is a vectorized
+    mask + distance pass instead of a pure-Python scan of all ~12k rows.
     """
-    candidates = [
-        row for row in db_rows
-        if row["engine"] == engine
-        and row["level"] == level
-        and row.get("success", 1) == 1
-        and row.get("ratio", 0) > 0
-    ]
+    raw_matrix, engine_arr, level_arr = _get_feature_matrix(db_rows)
+    mask = (engine_arr == engine) & (level_arr == level)
+    candidate_idx = np.nonzero(mask)[0]
+    candidate_idx = [i for i in candidate_idx if db_rows[i].get("ratio", 0) > 0]
 
-    if not candidates:
+    if not candidate_idx:
         return []
 
-    distances = [
-        (_euclidean_distance(profile, row), row)
-        for row in candidates
-    ]
-    distances.sort(key=lambda x: x[0])
-    return distances[:k]
+    distances = _vectorized_distances(profile, raw_matrix[candidate_idx])
+    order = np.argsort(distances)[:k]
+
+    return [(float(distances[i]), db_rows[candidate_idx[i]]) for i in order]
 
 
 def _weighted_average(neighbors: list, key: str) -> float:
@@ -265,6 +266,7 @@ def predict(
     level:     int,
     db_path:   Optional[Path] = None,
     k:         int = K,
+    profile:   Optional[FileProfile] = None,
 ) -> Optional[Prediction]:
     """
     Predict compression metrics for file_path using engine at level.
@@ -275,6 +277,9 @@ def predict(
         level     : compression level
         db_path   : optional custom path to benchmark.db
         k         : number of neighbors to use
+        profile   : pre-computed FileProfile, if the caller already has one
+                    (e.g. batch folder previews) — avoids re-reading and
+                    re-profiling the file from disk
 
     Returns:
         Prediction dataclass, or None if no neighbors found in DB.
@@ -285,8 +290,9 @@ def predict(
     if level not in ENGINE_LEVELS[engine]:
         raise ValueError(f"Level {level} not valid for {engine}. Valid: {ENGINE_LEVELS[engine]}")
 
-    # --- profile file ---
-    profile = profile_file(file_path)
+    # --- profile file (skip if caller already has one) ---
+    if profile is None:
+        profile = profile_file(file_path)
 
     # --- load DB ---
     from selector import get_db_rows, DB_PATH
@@ -301,9 +307,16 @@ def predict(
 
     # --- compute predictions ---
     predicted_ratio  = _weighted_average(neighbors, "ratio")
-    predicted_cmp    = _weighted_average(neighbors, "compress_speed")
-    predicted_dcmp   = _weighted_average(neighbors, "decompress_speed")
     predicted_memory = _weighted_average(neighbors, "peak_memory_mb")
+
+    # compress_speed/decompress_speed in benchmark.db were measured on
+    # whichever machine generated the DB — scale by this machine's measured
+    # throughput (calibration.py) so predicted time reflects local hardware
+    # instead of drifting on faster/slower CPUs. Factor defaults to 1.0
+    # (no adjustment) until calibration has run once.
+    speed_factor = get_speed_factor()
+    predicted_cmp    = _weighted_average(neighbors, "compress_speed") * speed_factor
+    predicted_dcmp   = _weighted_average(neighbors, "decompress_speed") * speed_factor
 
     # --- prediction range ---
     ratios    = [row["ratio"] for _, row in neighbors]

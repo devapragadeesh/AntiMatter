@@ -41,12 +41,8 @@ class ProfileWorker(QThread):
 
     def run(self):
         try:
-            # add project root to path so imports work
-            import sys
-            from pathlib import Path
-            root = Path(__file__).parent.parent
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+            from paths import ensure_on_path
+            ensure_on_path()
 
             from profiler import profile_file
             from selector import select
@@ -143,11 +139,8 @@ class CompressWorker(QThread):
 
     def run(self):
         try:
-            import sys
-            from pathlib import Path
-            root = Path(__file__).parent.parent
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+            from paths import ensure_on_path
+            ensure_on_path()
 
             from compressor import compress
 
@@ -199,6 +192,7 @@ class FolderProfileWorker(QThread):
     Walks a folder and computes an aggregated preview (predicted ratio,
     output size, confidence, per-engine breakdown) without compressing.
     """
+    progress = Signal(int)    # 0-100, driven by real per-file completions
     finished = Signal(dict)
     error    = Signal(str)
 
@@ -212,20 +206,22 @@ class FolderProfileWorker(QThread):
 
     def run(self):
         try:
-            import sys
-            from pathlib import Path
-            root = Path(__file__).parent.parent
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+            from paths import ensure_on_path
+            ensure_on_path()
 
             from archiver import preview_folder
+
+            def on_progress(files_done, files_total, current_name):
+                pct = int(files_done / files_total * 100) if files_total else 100
+                self.progress.emit(pct)
 
             constraints = [(self.constraint, self.degree)]
             kwargs = {}
             if self.db_path:
                 kwargs["db_path"] = self.db_path
 
-            result = preview_folder(self.folder_path, constraints, **kwargs)
+            result = preview_folder(self.folder_path, constraints, progress_cb=on_progress, **kwargs)
+            self.progress.emit(100)
             self.finished.emit(result)
 
         except Exception as e:
@@ -261,11 +257,8 @@ class FolderCompressWorker(QThread):
 
     def run(self):
         try:
-            import sys
-            from pathlib import Path
-            root = Path(__file__).parent.parent
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+            from paths import ensure_on_path
+            ensure_on_path()
 
             from archiver import compress_folder
 
@@ -297,6 +290,68 @@ class FolderCompressWorker(QThread):
                 "output_size_mb":   result.total_output_size / 1024 / 1024,
                 "compress_time":    result.elapsed,
                 "output_path":      str(result.output_path),
+            })
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ---------------------------------------------------------------------------
+# Standard Format Compress Worker
+# Creates a .zip/.tar.{gz,bz2,xz} archive for a file or folder — bypasses
+# profiling/selection entirely since these formats use one fixed codec.
+# ---------------------------------------------------------------------------
+
+class StandardCompressWorker(QThread):
+    progress = Signal(int)    # 0-100, driven by real per-file completions
+    finished = Signal(dict)
+    error    = Signal(str)
+
+    def __init__(
+        self,
+        input_path:  Path,
+        output_path: Optional[Path],
+        format_name: str,   # "zip" | "tar.gz" | "tar.bz2" | "tar.xz"
+    ):
+        super().__init__()
+        self.input_path  = input_path
+        self.output_path = output_path
+        self.format_name = format_name
+
+    def run(self):
+        try:
+            from paths import ensure_on_path
+            ensure_on_path()
+
+            from standard_formats import compress_to_zip, compress_to_tar
+
+            def on_progress(files_done, files_total, current_name):
+                pct = int(files_done / files_total * 100) if files_total else 100
+                self.progress.emit(pct)
+
+            if self.format_name == "zip":
+                result = compress_to_zip(self.input_path, self.output_path, progress_cb=on_progress)
+            else:
+                compression = self.format_name.split(".", 1)[1]
+                result = compress_to_tar(
+                    self.input_path, self.output_path, compression=compression, progress_cb=on_progress
+                )
+
+            if not result.success:
+                self.error.emit(result.error or "Archive compression failed")
+                return
+
+            self.progress.emit(100)
+            self.finished.emit({
+                "file_count":       result.file_count,
+                "dir_count":        result.dir_count,
+                "skipped":          result.skipped,
+                "ratio":            result.ratio,
+                "input_size_mb":    result.total_input_size  / 1024 / 1024,
+                "output_size_mb":   result.total_output_size / 1024 / 1024,
+                "compress_time":    result.elapsed,
+                "output_path":      str(result.output_path),
+                "engine":           f"{self.format_name} (standard)",
             })
 
         except Exception as e:
@@ -358,11 +413,8 @@ class DecompressWorker(QThread):
 
     def run(self):
         try:
-            import sys
-            from pathlib import Path
-            root = Path(__file__).parent.parent
-            if str(root) not in sys.path:
-                sys.path.insert(0, str(root))
+            from paths import ensure_on_path
+            ensure_on_path()
 
             if self.file_path.suffix.lower() == ".szip":
                 from archiver import decompress_folder
@@ -390,6 +442,42 @@ class DecompressWorker(QThread):
                     "decompress_time":  result.elapsed,
                     "output_path":      str(result.output_path),
                     "engine":           "szip (per-file)",
+                })
+                return
+
+            from standard_formats import _sniff_format, UnsupportedFormatError
+
+            try:
+                archive_format = _sniff_format(self.file_path)
+            except UnsupportedFormatError:
+                archive_format = None
+
+            if archive_format in ("zip", "tar", "rar"):
+                from standard_formats import extract_archive
+
+                def on_progress(files_done, files_total, current_name):
+                    pct = int(files_done / files_total * 100) if files_total else 100
+                    self.progress.emit(pct)
+
+                result = extract_archive(
+                    self.file_path, self.output_path, progress_cb=on_progress
+                )
+
+                if not result.success:
+                    self.error.emit(result.error or "Archive extraction failed")
+                    return
+
+                self.progress.emit(100)
+                self.finished.emit({
+                    "is_folder":        True,
+                    "file_count":       result.file_count,
+                    "dir_count":        result.dir_count,
+                    "skipped":          result.skipped,
+                    "input_size_mb":    result.total_input_size  / 1024 / 1024,
+                    "output_size_mb":   result.total_output_size / 1024 / 1024,
+                    "decompress_time":  result.elapsed,
+                    "output_path":      str(result.output_path),
+                    "engine":           f"{archive_format} (standard)",
                 })
                 return
 
