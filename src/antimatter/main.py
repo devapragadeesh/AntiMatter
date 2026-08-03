@@ -2,12 +2,25 @@
 main.py
 Entry point for ANTI MATTER.
 
-Run from the project root:
+Preferred (from the src/ folder):
     python -m antimatter --context-compress "C:\\path\\to\\file_or_folder"
     python -m antimatter --context-extract "C:\\path\\to\\archive.szip"
     python -m antimatter --register      (writes HKCU context-menu registry keys)
     python -m antimatter --unregister    (removes them)
+
+Also runnable directly (e.g. an IDE's Run button on this file) — the
+bootstrap block below re-execs it as `antimatter.main` so the package's
+relative imports still resolve.
 """
+
+if __name__ == "__main__" and __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    src_dir = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(src_dir))
+    import antimatter.main
+    antimatter.main.main()
+    sys.exit()
 
 import sys
 import argparse
