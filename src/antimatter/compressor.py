@@ -25,6 +25,7 @@ Decompress:
     python compressor.py path/to/file.lzma --decompress
 """
 
+import bz2
 import gzip
 import lzma
 import time
@@ -53,6 +54,7 @@ ENGINE_EXTENSIONS = {
     "gzip":   ".gz",
     "lzma":   ".lzma",
     "brotli": ".br",
+    "bzip2":  ".bz2",
 }
 
 EXTENSION_ENGINE_MAP = {v: k for k, v in ENGINE_EXTENSIONS.items()}
@@ -153,6 +155,12 @@ def _compress_brotli(data: bytes, level: int) -> bytes:
 def _decompress_brotli(data: bytes) -> bytes:
     return brotli.decompress(data)
 
+def _compress_bzip2(data: bytes, level: int) -> bytes:
+    return bz2.compress(data, compresslevel=level)
+
+def _decompress_bzip2(data: bytes) -> bytes:
+    return bz2.decompress(data)
+
 
 COMPRESS_FN = {
     "zstd":   _compress_zstd,
@@ -160,6 +168,7 @@ COMPRESS_FN = {
     "gzip":   _compress_gzip,
     "lzma":   _compress_lzma,
     "brotli": _compress_brotli,
+    "bzip2":  _compress_bzip2,
 }
 
 DECOMPRESS_FN = {
@@ -168,6 +177,7 @@ DECOMPRESS_FN = {
     "gzip":   _decompress_gzip,
     "lzma":   _decompress_lzma,
     "brotli": _decompress_brotli,
+    "bzip2":  _decompress_bzip2,
 }
 
 

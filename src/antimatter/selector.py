@@ -458,6 +458,7 @@ def _build_reason(winner: EngineScore, constraints: list) -> str:
         "brotli": "Brotli excels on text and structured content",
         "lz4":    "LZ4 is the fastest option with acceptable ratio",
         "gzip":   "gzip provides universal compatibility",
+        "bzip2":  "bzip2's Burrows-Wheeler transform gives strong ratios on structured/numeric data",
     }
     note = engine_notes.get(engine, "")
 

@@ -18,6 +18,7 @@ Engines + levels (stage 1):
     gzip:   1, 3, 6, 9
     lzma:   1, 3, 5, 7, 9
     brotli: 1, 4, 7, 9, 11
+    bzip2:  1, 3, 6, 9
 
 Usage (standalone test):
     python runner.py path/to/chunk.bin zstd 3
@@ -25,6 +26,7 @@ Usage (standalone test):
     python runner.py path/to/chunk.bin gzip 6
 """
 
+import bz2
 import gzip
 import lzma
 import time
@@ -47,6 +49,7 @@ ENGINE_LEVELS = {
     "gzip":   [1, 3, 6, 9],
     "lzma":   [1, 3, 5, 7, 9],
     "brotli": [1, 4, 7, 9, 11],
+    "bzip2":  [1, 3, 6, 9],
 }
 
 ALL_ENGINES = list(ENGINE_LEVELS.keys())
@@ -184,12 +187,19 @@ def _run_brotli(data: bytes, level: int) -> tuple:
     return compress_fn, decompress_fn
 
 
+def _run_bzip2(data: bytes, level: int) -> tuple:
+    compress_fn   = lambda d: bz2.compress(d, compresslevel=level)
+    decompress_fn = lambda d: bz2.decompress(d)
+    return compress_fn, decompress_fn
+
+
 ENGINE_FN_MAP = {
     "zstd":   _run_zstd,
     "lz4":    _run_lz4,
     "gzip":   _run_gzip,
     "lzma":   _run_lzma,
     "brotli": _run_brotli,
+    "bzip2":  _run_bzip2,
 }
 
 

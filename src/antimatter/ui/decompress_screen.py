@@ -24,6 +24,7 @@ EXTENSION_ENGINE = {
     ".gz":    "gzip",
     ".lzma":  "lzma",
     ".br":    "brotli",
+    ".bz2":   "bzip2",
 }
 
 ARCHIVE_EXTENSION = ".szip"
@@ -79,7 +80,7 @@ class DecompressDropZone(QFrame):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select compressed file",
             filter=(
-                "Compressed files (*.zst *.lz4 *.gz *.lzma *.br *.szip "
+                "Compressed files (*.zst *.lz4 *.gz *.lzma *.br *.bz2 *.szip "
                 "*.zip *.rar *.tar *.tar.gz *.tar.bz2 *.tar.xz *.tgz);;"
                 "All files (*)"
             )
@@ -299,7 +300,7 @@ class DecompressPredictionCard(QFrame):
         decomp_speeds = {
             "zstd":   2500, "lz4": 3500,
             "gzip":   1500, "lzma": 400,
-            "brotli": 900,
+            "brotli": 900,  "bzip2": 20,
         }
         speed = decomp_speeds.get(engine, 1000)
         est_time = compressed_mb / speed

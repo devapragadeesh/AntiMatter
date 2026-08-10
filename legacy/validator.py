@@ -34,6 +34,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
+import bz2
 import lz4.frame
 import zstandard as zstd
 import brotli
@@ -109,6 +110,12 @@ def _compress_and_decompress(data: bytes, engine: str, level: int) -> tuple:
                 lambda: brotli.compress(data, quality=level)
             )
             _, d_time, _ = _timed(lambda: brotli.decompress(compressed))
+
+        elif engine == "bzip2":
+            compressed, c_time, peak = _timed(
+                lambda: bz2.compress(data, compresslevel=level)
+            )
+            _, d_time, _ = _timed(lambda: bz2.decompress(compressed))
 
         else:
             return None, 0.0, 0.0, 0.0
@@ -558,19 +565,20 @@ def main():
         print(f"  {'Constraint':<22} {'Degree':<12} Result")
         print(f"  {'-'*54}")
 
+        total_combos = sum(len(levels) for levels in ENGINE_LEVELS.values())
         for constraint, degree, rank in ranks:
             if rank == 1:
                 emoji = "✅"
-                label = f"rank {rank}/26  OPTIMAL"
+                label = f"rank {rank}/{total_combos}  OPTIMAL"
             elif rank <= 3:
                 emoji = "✅"
-                label = f"rank {rank}/26  GOOD"
+                label = f"rank {rank}/{total_combos}  GOOD"
             elif rank <= 5:
                 emoji = "⚠️ "
-                label = f"rank {rank}/26  ACCEPTABLE"
+                label = f"rank {rank}/{total_combos}  ACCEPTABLE"
             else:
                 emoji = "❌"
-                label = f"rank {rank}/26  POOR"
+                label = f"rank {rank}/{total_combos}  POOR"
             print(f"  {emoji}  {constraint:<20} {degree:<12} {label}")
 
         optimal = sum(1 for _, _, r in ranks if r == 1)

@@ -73,12 +73,13 @@
   python runner.py path/to/chunk.bin brotli
   python runner.py path/to/chunk.bin lzma
 
-  # valid engines:  zstd  lz4  gzip  lzma  brotli
-  # zstd levels:    1  3  6  9  12  15  19
-  # lz4  levels:    1  3  6  9  12
-  # gzip levels:    1  3  6  9
-  # lzma levels:    1  3  5  7  9
+  # valid engines:  zstd  lz4  gzip  lzma  brotli  bzip2
+  # zstd  levels:   1  3  6  9  12  15  19
+  # lz4   levels:   1  3  6  9  12
+  # gzip  levels:   1  3  6  9
+  # lzma  levels:   1  3  5  7  9
   # brotli levels:  1  4  7  9  11
+  # bzip2 levels:   1  3  6  9
 
 
 ----------------------------------------------------------------
@@ -157,6 +158,7 @@
   python compressor.py path/to/file.xlsx --engine brotli --level 11
   python compressor.py path/to/file.xlsx --engine lzma   --level 9
   python compressor.py path/to/file.xlsx --engine lz4    --level 1
+  python compressor.py path/to/file.xlsx --engine bzip2  --level 9
 
   -- DECOMPRESS --
 
@@ -166,6 +168,7 @@
   python compressor.py path/to/file.bin.lz4    --decompress
   python compressor.py path/to/file.xml.gz     --decompress
   python compressor.py path/to/file.xlsx.lzma  --decompress
+  python compressor.py path/to/file.xlsx.bz2   --decompress
 
   # decompress to specific folder
   python compressor.py path/to/file.zst --decompress --output C:/restored/
@@ -191,6 +194,7 @@
   gzip   → .gz
   lzma   → .lzma
   brotli → .br
+  bzip2  → .bz2
 
 
 ----------------------------------------------------------------
@@ -234,9 +238,10 @@
 ----------------------------------------------------------------
 
   python -c "
-  import gzip, lzma, lz4, zstandard, brotli
+  import gzip, lzma, bz2, lz4, zstandard, brotli
   print('gzip       stdlib')
   print('lzma       stdlib')
+  print('bz2        stdlib')
   print('lz4       ', lz4.__version__)
   print('zstandard ', zstandard.__version__)
   print('brotli    ', brotli.__version__)

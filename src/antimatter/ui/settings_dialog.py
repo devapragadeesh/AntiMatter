@@ -92,7 +92,7 @@ class SettingsDialog(QDialog):
         # about
         about_lbl = QLabel(
             "ANTI MATTER  v1.0  —  Smart Compression Tool\n"
-            "Built with Python, PySide6, zstd, lz4, brotli, gzip, lzma"
+            "Built with Python, PySide6, zstd, lz4, brotli, gzip, lzma, bzip2"
         )
         about_lbl.setObjectName("secondary_label")
         about_lbl.setAlignment(Qt.AlignCenter)
