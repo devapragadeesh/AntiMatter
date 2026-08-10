@@ -40,9 +40,13 @@ import brotli
 import gzip
 import lzma
 
-from profiler import profile_file
-from runner import ENGINE_LEVELS
-from selector import (
+import sys
+from pathlib import Path as _Path
+sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / "src"))
+
+from antimatter.profiler import profile_file
+from antimatter.runner import ENGINE_LEVELS
+from antimatter.selector import (
     select, build_weight_vector,
     get_db_rows, find_neighbors, _predict_for_engine_level,
     VALID_CONSTRAINTS, VALID_DEGREES,
