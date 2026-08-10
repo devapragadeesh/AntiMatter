@@ -42,6 +42,7 @@ from .profiler import profile_file
 from .selector import select, VALID_CONSTRAINTS, VALID_DEGREES, Recommendation
 from .predictor import predict, compare as compare_prediction, Prediction
 from .runner import ENGINE_LEVELS
+from .paths import resolve_output_path
 
 # ---------------------------------------------------------------------------
 # Output file extensions per engine
@@ -192,10 +193,8 @@ def compress(
         )
 
     ext = ENGINE_EXTENSIONS.get(engine, ".compressed")
-    if output_path is None:
-        output_path = input_path.with_suffix(input_path.suffix + ext)
-    elif output_path.is_dir():
-        output_path = output_path / (input_path.name + ext)
+    default_output = input_path.with_suffix(input_path.suffix + ext)
+    output_path = resolve_output_path(output_path, default_output)
 
     try:
         data = input_path.read_bytes()
@@ -305,10 +304,8 @@ def decompress(
                 )
             )
 
-    if output_path is None:
-        output_path = input_path.with_suffix("")
-    elif output_path.is_dir():
-        output_path = output_path / input_path.stem
+    default_output = input_path.with_suffix("")
+    output_path = resolve_output_path(output_path, default_output)
 
     try:
         data = input_path.read_bytes()

@@ -45,6 +45,7 @@ from .profiler import profile_file
 from .selector import select, DB_PATH as SELECTOR_DB_PATH
 from .predictor import predict
 from .compressor import COMPRESS_FN, DECOMPRESS_FN
+from .paths import resolve_output_path
 
 # Thread pool size for parallel per-file profiling ahead of a folder
 # compress/preview run. Profiling is I/O-bound (reading file samples) plus
@@ -261,10 +262,8 @@ def compress_folder(
             success=False, error=f"Not a directory: {input_path}",
         )
 
-    if output_path is None:
-        output_path = input_path.with_suffix(input_path.suffix + ARCHIVE_EXTENSION)
-    elif output_path.is_dir():
-        output_path = output_path / (input_path.name + ARCHIVE_EXTENSION)
+    default_output = input_path.with_suffix(input_path.suffix + ARCHIVE_EXTENSION)
+    output_path = resolve_output_path(output_path, default_output)
 
     all_entries = list(iter_folder_entries(input_path))
     skipped = []

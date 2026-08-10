@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from .archiver import ArchiveResult, iter_folder_entries
+from .paths import resolve_output_path
 
 try:
     import rarfile
@@ -89,11 +90,9 @@ def compress_to_zip(
             error=f"Unknown zip compression '{compression}', expected one of {list(ZIP_COMPRESSION_METHODS)}",
         )
 
-    if output_path is None:
-        output_path = input_path.with_suffix(input_path.suffix + ".zip") if input_path.is_file() \
-            else input_path.with_suffix(".zip")
-    elif output_path.is_dir():
-        output_path = output_path / (input_path.name + ".zip")
+    default_output = input_path.with_suffix(input_path.suffix + ".zip") if input_path.is_file() \
+        else input_path.with_suffix(".zip")
+    output_path = resolve_output_path(output_path, default_output)
 
     if input_path.is_dir():
         entries = [(a, r, d) for a, r, d, is_symlink in iter_folder_entries(input_path) if not is_symlink]
@@ -174,11 +173,8 @@ def compress_to_tar(
         )
 
     suffix = TAR_SUFFIXES[compression]
-    if output_path is None:
-        base = input_path.name
-        output_path = input_path.parent / (base + suffix)
-    elif output_path.is_dir():
-        output_path = output_path / (input_path.name + suffix)
+    default_output = input_path.parent / (input_path.name + suffix)
+    output_path = resolve_output_path(output_path, default_output)
 
     if input_path.is_dir():
         entries = [(a, r, d) for a, r, d, is_symlink in iter_folder_entries(input_path) if not is_symlink]
